@@ -105,6 +105,30 @@ def init_db():
             )
         """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS import_jobs (
+                id TEXT PRIMARY KEY,
+                did TEXT NOT NULL,
+                source TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'preview',
+                total INTEGER NOT NULL DEFAULT 0,
+                imported INTEGER NOT NULL DEFAULT 0,
+                skipped INTEGER NOT NULL DEFAULT 0,
+                failed INTEGER NOT NULL DEFAULT 0,
+                errors JSONB NOT NULL DEFAULT '[]',
+                manifest JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ
+            )
+        """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_import_jobs_did
+                ON import_jobs (did)
+        """
+        )
 
 
 def upsert_activity(conn, did, rkey, record):
@@ -388,6 +412,83 @@ def has_profile(conn, did):
     return row is not None
 
 
+def fetch_activities_in_range(conn, did, min_started_at, max_started_at, padding_seconds=120):
+    """Fetch a user's existing activities within a time range (plus padding).
+
+    Returns a list of dicts suitable for passing to find_duplicates_in_list().
+    One query covers the entire import, no matter how many activities.
+    """
+    return conn.execute(
+        """
+        SELECT did, rkey, sport_type, started_at, distance, elapsed_time
+        FROM activities
+        WHERE did = %s
+          AND started_at BETWEEN %s - INTERVAL '%s seconds'
+                             AND %s + INTERVAL '%s seconds'
+        """,
+        (did, min_started_at, padding_seconds, max_started_at, padding_seconds),
+    ).fetchall()
+
+
+def find_duplicates_in_list(needle, candidates, time_window=60,
+                            distance_tolerance=0.01, elapsed_tolerance=60):
+    """Check a list of candidate activities against a single activity for duplicates.
+
+    Pure logic, no database. Both needle and candidates use snake_case keys:
+    sport_type, started_at (ISO string or datetime), distance (string or float),
+    elapsed_time (int).
+
+    Returns the list of candidates that match all criteria.
+    """
+    from datetime import datetime as dt
+
+    def to_datetime(val):
+        if isinstance(val, dt):
+            return val
+        if isinstance(val, str):
+            s = val.strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            return dt.fromisoformat(s)
+        return None
+
+    def to_float(val):
+        if val is None:
+            return 0.0
+        return float(val)
+
+    needle_time = to_datetime(needle["started_at"])
+    needle_dist = to_float(needle["distance"])
+    needle_elapsed = int(needle["elapsed_time"]) if needle["elapsed_time"] else 0
+
+    matches = []
+    for candidate in candidates:
+        if candidate["sport_type"] != needle["sport_type"]:
+            continue
+
+        cand_time = to_datetime(candidate["started_at"])
+        if needle_time and cand_time:
+            if abs((needle_time - cand_time).total_seconds()) > time_window:
+                continue
+        else:
+            continue
+
+        cand_dist = to_float(candidate["distance"])
+        if needle_dist > 0 and cand_dist > 0:
+            if abs(needle_dist - cand_dist) / max(needle_dist, cand_dist) > distance_tolerance:
+                continue
+        elif needle_dist != cand_dist:
+            continue
+
+        cand_elapsed = int(candidate["elapsed_time"]) if candidate["elapsed_time"] else 0
+        if abs(needle_elapsed - cand_elapsed) > elapsed_tolerance:
+            continue
+
+        matches.append(candidate)
+
+    return matches
+
+
 def get_activity(conn, did, rkey):
     return conn.execute(
         """
@@ -401,3 +502,75 @@ def get_activity(conn, did, rkey):
         """,
         (did, rkey),
     ).fetchone()
+
+
+# Import job helpers
+
+
+def create_import_job(conn, job_id, did, source, total, manifest):
+    conn.execute(
+        """
+        INSERT INTO import_jobs (id, did, source, status, total, manifest)
+        VALUES (%s, %s, %s, 'preview', %s, %s)
+    """,
+        (job_id, did, source, total, psycopg.types.json.Json(manifest)),
+    )
+    conn.commit()
+
+
+def get_import_job_for_user(conn, job_id, did):
+    return conn.execute(
+        "SELECT * FROM import_jobs WHERE id = %s AND did = %s", (job_id, did)
+    ).fetchone()
+
+
+def update_import_job_status(conn, job_id, status):
+    conn.execute(
+        "UPDATE import_jobs SET status = %s WHERE id = %s",
+        (status, job_id),
+    )
+    conn.commit()
+
+
+def update_import_job_progress(conn, job_id, imported, skipped, failed, errors=None):
+    if errors is not None:
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET imported = %s, skipped = %s, failed = %s, errors = %s
+            WHERE id = %s
+        """,
+            (imported, skipped, failed, psycopg.types.json.Json(errors), job_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET imported = %s, skipped = %s, failed = %s
+            WHERE id = %s
+        """,
+            (imported, skipped, failed, job_id),
+        )
+    conn.commit()
+
+
+def complete_import_job(conn, job_id, status="completed"):
+    conn.execute(
+        "UPDATE import_jobs SET status = %s, completed_at = NOW() WHERE id = %s",
+        (status, job_id),
+    )
+    conn.commit()
+
+
+def list_import_jobs_for_user(conn, did, limit=10):
+    return conn.execute(
+        """
+        SELECT id, did, status, total, imported, skipped, failed, errors,
+               created_at, completed_at
+        FROM import_jobs
+        WHERE did = %s
+        ORDER BY created_at DESC
+        LIMIT %s
+    """,
+        (did, limit),
+    ).fetchall()
