@@ -1,0 +1,170 @@
+<div webc:root>
+  <label>
+    <slot></slot>
+    <input type="file" hidden disabled />
+    <div class="messages"><p class="placeholder">&nbsp;</p></div>
+  </label>
+</div>
+
+<style webc:scoped>
+  :host {
+    display: block;
+  }
+
+  label {
+    border: 3px dashed
+      color-mix(in srgb, var(--color-accent-primary) 60%, transparent);
+    border-radius: 20px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    row-gap: 0.75rem;
+    padding: 3rem 1.5rem 1rem 1.5rem;
+    position: relative;
+    text-align: center;
+
+    &:not(&:has(input[disabled])):where(:hover, :focus-within),
+    &.drag-over {
+      background-color: color-mix(
+        in srgb,
+        var(--color-accent-primary) 8%,
+        transparent
+      );
+      border-color: var(--color-accent-primary);
+    }
+
+    &:has(input[disabled]) {
+      border-color: color-mix(in srgb, currentColor 10%, transparent);
+      cursor: default;
+
+      a:not([href]) {
+        cursor: default;
+      }
+
+      p:not(.messages p) {
+        opacity: 50%;
+      }
+    }
+
+    p {
+      letter-spacing: -1%;
+      line-height: 1;
+    }
+
+    p:nth-of-type(1) {
+      font-size: var(--font-size-1_5);
+      font-weight: 500;
+    }
+
+    a {
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    .messages {
+      bottom: 0;
+      display: flex;
+      justify-content: center;
+      left: 0;
+      width: 100%;
+
+      p {
+        background: hsl(var(--color-accent-foreground-hsl-dark));
+        border-radius: 16px;
+        color: white;
+        font-size: var(--font-size-0_75);
+        padding: 0.35rem 0.75rem;
+        text-align: center;
+
+        &.error {
+          background: var(--color-accent-error);
+        }
+
+        &.placeholder {
+          opacity: 0;
+        }
+      }
+
+      a {
+        color: inherit;
+      }
+    }
+  }
+</style>
+
+<script webc:bucket="components">
+  class FileDropZone extends HTMLElement {
+    connectedCallback() {
+      const dropZone = this.querySelector("label");
+      const fileInput = this.querySelector("input[type=file]");
+
+      const accept = this.getAttribute("accept");
+      if (accept) fileInput.setAttribute("accept", accept);
+      if (this.hasAttribute("multiple")) fileInput.setAttribute("multiple", "");
+      if (this.hasAttribute("webkitdirectory"))
+        fileInput.setAttribute("webkitdirectory", "");
+
+      dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("drag-over");
+      });
+
+      dropZone.addEventListener("dragleave", () => {
+        dropZone.classList.remove("drag-over");
+      });
+
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("drag-over");
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+          this.dispatchEvent(
+            new CustomEvent("files-selected", {
+              detail: { files },
+              bubbles: true,
+            }),
+          );
+        }
+      });
+
+      fileInput.addEventListener("change", () => {
+        if (fileInput.files.length > 0) {
+          this.dispatchEvent(
+            new CustomEvent("files-selected", {
+              detail: { files: fileInput.files },
+              bubbles: true,
+            }),
+          );
+        }
+      });
+    }
+
+    enable() {
+      const fileInput = this.querySelector("input[type=file]");
+      if (fileInput) fileInput.removeAttribute("disabled");
+    }
+
+    disable() {
+      const fileInput = this.querySelector("input[type=file]");
+      if (fileInput) fileInput.setAttribute("disabled", "");
+    }
+
+    get messagesContainer() {
+      return this.querySelector(".messages");
+    }
+
+    showError(message) {
+      this.messagesContainer.innerHTML = `<p class="error">${message}</p>`;
+    }
+
+    showStatus(message) {
+      this.messagesContainer.innerHTML = `<p class="status">${message}</p>`;
+    }
+
+    clearMessages() {
+      this.messagesContainer.innerHTML = "<p class='placeholder'>&nbsp;</p>";
+    }
+  }
+
+  customElements.define("file-drop-zone", FileDropZone);
+</script>
