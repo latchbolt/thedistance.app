@@ -1,0 +1,103 @@
+---
+layout: layout.webc
+title: Import from Strava - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <h2>Import from Strava</h2>
+      <p>Bulk export and import your Strava data.</p>
+    </header>
+
+    <div class="import-body">
+      <div class="import-intro">
+        <p>
+          <b
+            >Due to Strava API Agreement restrictions, we can’t connect to your
+            Strava account and import your data.</b
+          >
+          What you can do is export all of your Strava data and upload it here.
+        </p>
+        <p>
+          The steps are listed below, if you run into trouble, see Strava’s
+          documentation page “<a
+            href="https://support.strava.com/hc/en-us/articles/216918437-Exporting-your-Data-and-Bulk-Export"
+            >Exporting your Data and Bulk Export</a
+          >”. Look for the “Bulk Export” section near the bottom.
+        </p>
+
+        <details>
+          <summary><strong>Strava export steps</strong></summary>
+
+          <ol>
+            <li>
+              Log into your <a href="https://strava.com">Strava account</a>
+            </li>
+            <li>
+              Hover over your name in the upper right-hand corner of the Strava
+              page
+            </li>
+            <li>
+              Choose “Settings,” then find the “My Account” tab from the menu
+              listed on the Left
+            </li>
+            <li>
+              Select “Get Started” under “Download or Delete Your Account”
+            </li>
+            <li>Select “Request your archive” on the next page</li>
+            <li>
+              You will receive an email with a link to download your data (this
+              may take a few hours)
+            </li>
+            <li>Once you have the zip file, upload it here</li>
+          </ol>
+        </details>
+      </div>
+      <div class="import-workspace">
+        <import-wizard></import-wizard>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+
+  .import-body {
+    column-gap: var(--grid-gutter);
+    row-gap: 2rem;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: wrap;
+  }
+
+  .import-intro {
+    flex: 1;
+
+    p + p,
+    details {
+      margin-top: 1rem;
+    }
+  }
+
+  .import-workspace {
+    flex: 1;
+  }
+
+  @media (min-width: 760px) {
+    .import-body {
+      flex-direction: row;
+    }
+
+    .import-intro {
+      max-width: var(--grid-max-3);
+    }
+  }
+</style>

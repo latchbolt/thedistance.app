@@ -1,0 +1,34 @@
+<div webc:root>
+  <form>
+    <file-drop-zone accept=".zip">
+      <p>Drop your export zip here or <a>Browse</a> to select.</p>
+      <p>You’ll get a chance to preview everything before saving.</p>
+    </file-drop-zone>
+  </form>
+</div>
+
+<script webc:bucket="components">
+  class ImportWizard extends HTMLElement {
+    connectedCallback() {
+      document.addEventListener("afterAuthCheck", (e) => {
+        const { user } = e.detail;
+
+        if (!user) {
+          this.dropZone.showError(
+            "<a href=’/login’>Log in</a> to upload Activities"
+          );
+          return;
+        }
+
+        this.user = user;
+        this.dropZone.enable();
+      });
+    }
+
+    get dropZone() {
+      return this.querySelector("file-drop-zone");
+    }
+  }
+
+  customElements.define("import-wizard", ImportWizard);
+</script>

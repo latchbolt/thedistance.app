@@ -1,0 +1,15 @@
+---
+layout: layout.webc
+title: Import - The Distance
+---
+
+<div class="g-max-centered">
+  <header>
+    <h2>Import</h2>
+    <p>Migrate your data from other services.</p>
+  </header>
+
+  <div>
+    <a href="/import/strava">Strava</a>
+  </div>
+</div>
