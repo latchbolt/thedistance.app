@@ -13,6 +13,7 @@ from app.auth import require_auth
 from app.backfill import backfill as run_backfill
 from app.config import get_settings
 from app.db import (
+    create_import_job,
     delete_activity,
     delete_auth_request,
     delete_oauth_session,
@@ -21,6 +22,8 @@ from app.db import (
     init_db,
     save_auth_request,
     save_oauth_session,
+    set_import_job_manifest,
+    update_import_job_status,
     update_oauth_session_pds_nonce,
     update_oauth_session_tokens,
     upsert_activity,
@@ -40,6 +43,7 @@ from app.identity import (
     resolve_identity,
 )
 from app.parse import parse_file
+from app.strava import process_strava_export
 from app.tid import generate_tid
 from app.oauth import (
     fetch_authserver_meta,
@@ -228,6 +232,62 @@ async def parse_files(
         result["errors"] = errors
 
     return result
+
+
+# --- Import endpoints ---
+
+@app.post("/api/import/strava")
+async def strava_preview(
+    file: UploadFile,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return JSONResponse(status_code=400, content={"error": "Please upload a .zip file"})
+
+    zip_data = await file.read()
+
+    # Validate the zip before creating a job
+    import zipfile
+    from io import BytesIO
+
+    try:
+        with zipfile.ZipFile(BytesIO(zip_data)) as zf:
+            if not any(name.endswith("activities.csv") for name in zf.namelist()):
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "No activities.csv found in zip"},
+                )
+    except zipfile.BadZipFile:
+        return JSONResponse(status_code=400, content={"error": "File is not a valid zip archive"})
+
+    job_id = generate_tid()
+    did = session["did"]
+
+    conn = get_connection()
+    try:
+        create_import_job(conn, job_id, did, "strava")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(process_strava_export_job, job_id, zip_data, did)
+
+    return {"job_id": job_id}
+
+
+def process_strava_export_job(job_id: str, zip_data: bytes, did: str):
+    conn = get_connection()
+    try:
+        result = process_strava_export(zip_data, did=did, conn=conn)
+        activities = result["activities"]
+        duplicates = sum(1 for a in activities if a["duplicate"])
+        set_import_job_manifest(conn, job_id, activities, len(activities), duplicates)
+    except Exception:
+        log.exception("Import job %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
 
 
 # --- Record management endpoints ---

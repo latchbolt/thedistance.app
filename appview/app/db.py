@@ -113,6 +113,7 @@ def init_db():
                 source TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'preview',
                 total INTEGER NOT NULL DEFAULT 0,
+                duplicates INTEGER NOT NULL DEFAULT 0,
                 imported INTEGER NOT NULL DEFAULT 0,
                 skipped INTEGER NOT NULL DEFAULT 0,
                 failed INTEGER NOT NULL DEFAULT 0,
@@ -423,8 +424,8 @@ def fetch_activities_in_range(conn, did, min_started_at, max_started_at, padding
         SELECT did, rkey, sport_type, started_at, distance, elapsed_time
         FROM activities
         WHERE did = %s
-          AND started_at BETWEEN %s - INTERVAL '%s seconds'
-                             AND %s + INTERVAL '%s seconds'
+          AND started_at BETWEEN %s::timestamptz - make_interval(secs => %s)
+                             AND %s::timestamptz + make_interval(secs => %s)
         """,
         (did, min_started_at, padding_seconds, max_started_at, padding_seconds),
     ).fetchall()
@@ -507,13 +508,25 @@ def get_activity(conn, did, rkey):
 # Import job helpers
 
 
-def create_import_job(conn, job_id, did, source, total, manifest):
+def create_import_job(conn, job_id, did, source):
     conn.execute(
         """
-        INSERT INTO import_jobs (id, did, source, status, total, manifest)
-        VALUES (%s, %s, %s, 'preview', %s, %s)
+        INSERT INTO import_jobs (id, did, source, status)
+        VALUES (%s, %s, %s, 'processing')
     """,
-        (job_id, did, source, total, psycopg.types.json.Json(manifest)),
+        (job_id, did, source),
+    )
+    conn.commit()
+
+
+def set_import_job_manifest(conn, job_id, manifest, total, duplicates=0):
+    conn.execute(
+        """
+        UPDATE import_jobs
+        SET manifest = %s, total = %s, duplicates = %s, status = 'preview'
+        WHERE id = %s
+    """,
+        (psycopg.types.json.Json(manifest), total, duplicates, job_id),
     )
     conn.commit()
 

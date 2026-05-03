@@ -1,5 +1,7 @@
 import csv
 import gzip
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,7 @@ from app.strava import (
     merge_csv_metadata,
     parse_strava_csv,
     parse_strava_date,
+    process_strava_export,
     safe_float,
 )
 
@@ -438,3 +441,103 @@ class TestParseFileGzip:
             if key == "created_at":
                 continue
             assert from_fit[key] == from_gz[key], f"Mismatch on {key}"
+
+
+# ---------------------------------------------------------------------------
+# process_strava_export
+# ---------------------------------------------------------------------------
+
+def _make_zip(csv_rows, files=None):
+    """Build a zip archive in memory with activities.csv and optional files.
+
+    csv_rows: list of row lists (passed to _make_csv)
+    files: dict of {path: bytes} for backing files in the zip
+    """
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("activities.csv", _make_csv(csv_rows))
+        if files:
+            for path, data in files.items():
+                zf.writestr(path, data)
+    return buf.getvalue()
+
+
+class TestProcessStravaExport:
+    def test_csv_only_activity(self):
+        zip_data = _make_zip([_make_ride_row()])
+        result = process_strava_export(zip_data)
+        assert len(result["activities"]) == 1
+        assert result["errors"] == []
+        item = result["activities"][0]
+        assert item["activity"]["sport_type"] == "cycling"
+        assert item["activity"]["source"] == "strava"
+        assert item["duplicate"] is False
+
+    def test_activity_with_backing_file(self):
+        fit_data = (FIXTURES / "ride.fit").read_bytes()
+        gz_data = gzip.compress(fit_data)
+        row = _make_ride_row({12: "activities/12345.fit.gz"})
+        zip_data = _make_zip([row], {"activities/12345.fit.gz": gz_data})
+        result = process_strava_export(zip_data)
+        assert len(result["activities"]) == 1
+        item = result["activities"][0]
+        assert item["activity"]["source"] == "strava"
+        assert item["activity"]["title"] == "First Ride Since Winter"
+        assert "polyline" in item["activity"]
+        assert item["warnings"] == []
+
+    def test_missing_backing_file_falls_back_to_csv(self):
+        row = _make_ride_row({12: "activities/missing.fit.gz"})
+        zip_data = _make_zip([row])
+        result = process_strava_export(zip_data)
+        assert len(result["activities"]) == 1
+        item = result["activities"][0]
+        assert item["activity"]["source"] == "strava"
+        assert len(item["warnings"]) == 1
+        assert "not found" in item["warnings"][0].lower()
+
+    def test_no_filename_uses_csv_only(self):
+        row = _make_ride_row({12: ""})
+        zip_data = _make_zip([row])
+        result = process_strava_export(zip_data)
+        assert len(result["activities"]) == 1
+        assert result["activities"][0]["warnings"] == []
+
+    def test_multiple_activities(self):
+        zip_data = _make_zip([_make_ride_row(), _make_workout_row()])
+        result = process_strava_export(zip_data)
+        assert len(result["activities"]) == 2
+        types = {a["activity"]["sport_type"] for a in result["activities"]}
+        assert types == {"cycling", "workout"}
+
+    def test_invalid_zip(self):
+        with pytest.raises(ValueError, match="not a valid zip"):
+            process_strava_export(b"not a zip file")
+
+    def test_missing_csv(self):
+        buf = BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("readme.txt", "nothing here")
+        with pytest.raises(ValueError, match="No activities.csv"):
+            process_strava_export(buf.getvalue())
+
+    def test_empty_csv(self):
+        zip_data = _make_zip([])
+        result = process_strava_export(zip_data)
+        assert result["activities"] == []
+        assert result["errors"] == []
+
+    def test_activity_id_preserved(self):
+        row = _make_ride_row({0: "99999"})
+        zip_data = _make_zip([row])
+        result = process_strava_export(zip_data)
+        assert result["activities"][0]["activity_id"] == "99999"
+
+    def test_corrupt_backing_file_falls_back_to_csv(self):
+        row = _make_ride_row({12: "activities/bad.fit.gz"})
+        zip_data = _make_zip([row], {"activities/bad.fit.gz": b"not a fit file"})
+        result = process_strava_export(zip_data)
+        assert len(result["activities"]) == 1
+        item = result["activities"][0]
+        assert item["activity"]["source"] == "strava"
+        assert len(item["warnings"]) == 1

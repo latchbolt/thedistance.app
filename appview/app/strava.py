@@ -1,9 +1,11 @@
 import csv
 import logging
+import zipfile
 from datetime import UTC, datetime
-from io import StringIO
+from io import BytesIO, StringIO
 
-from app.parse import _build_activity, _normalize_sport_type, _parse_iso_time
+from app.db import fetch_activities_in_range, find_duplicates_in_list
+from app.parse import _build_activity, _normalize_sport_type, _parse_iso_time, parse_file
 
 log = logging.getLogger(__name__)
 
@@ -172,3 +174,93 @@ def safe_float(value: str | None) -> float | None:
         return result if result != 0.0 else None
     except ValueError:
         return None
+
+
+def process_strava_export(zip_data: bytes, did: str | None = None, conn=None) -> dict:
+    """Process a Strava export zip and return a manifest of activities.
+
+    Returns a dict with:
+        activities: list of {activity, duplicate, duplicate_of, warnings}
+        errors: list of {activity_id, error}
+    """
+    try:
+        zf = zipfile.ZipFile(BytesIO(zip_data))
+    except zipfile.BadZipFile:
+        raise ValueError("File is not a valid zip archive")
+
+    csv_path = None
+    for name in zf.namelist():
+        if name.endswith("activities.csv") and "/" not in name.rstrip("/").replace("activities.csv", ""):
+            csv_path = name
+            break
+
+    if not csv_path:
+        raise ValueError("No activities.csv found in zip")
+
+    csv_data = zf.read(csv_path).decode("utf-8-sig")
+    rows = parse_strava_csv(csv_data)
+
+    if not rows:
+        return {"activities": [], "errors": []}
+
+    manifest = []
+    errors = []
+
+    for row in rows:
+        activity_id = row.get("activity_id", "")
+        filename = row.get("filename", "").strip()
+        warnings = []
+
+        try:
+            if filename:
+                try:
+                    file_data = zf.read(filename)
+                    file_activity = parse_file(filename, file_data)
+                    activity = merge_csv_metadata(file_activity, row)
+                except KeyError:
+                    warnings.append(f"File not found in zip: {filename}")
+                    activity = build_activity_from_strava_csv(row)
+                except Exception as e:
+                    warnings.append(f"Could not parse {filename}: {e}")
+                    activity = build_activity_from_strava_csv(row)
+            else:
+                activity = build_activity_from_strava_csv(row)
+
+            manifest.append({
+                "activity": activity,
+                "activity_id": activity_id,
+                "duplicate": False,
+                "duplicate_of": None,
+                "warnings": warnings,
+            })
+        except Exception as e:
+            log.exception("Failed to process activity %s", activity_id)
+            errors.append({"activity_id": activity_id, "error": str(e)})
+
+    # Duplicate detection
+    if did and conn and manifest:
+        started_times = []
+        for item in manifest:
+            sa = item["activity"].get("started_at")
+            if sa:
+                started_times.append(sa)
+
+        if started_times:
+            min_started = min(started_times)
+            max_started = max(started_times)
+            candidates = fetch_activities_in_range(conn, did, min_started, max_started)
+
+            if candidates:
+                for item in manifest:
+                    needle = {
+                        "sport_type": item["activity"].get("sport_type"),
+                        "started_at": item["activity"].get("started_at"),
+                        "distance": item["activity"].get("distance"),
+                        "elapsed_time": item["activity"].get("elapsed_time"),
+                    }
+                    matches = find_duplicates_in_list(needle, candidates)
+                    if matches:
+                        item["duplicate"] = True
+                        item["duplicate_of"] = matches[0].get("rkey")
+
+    return {"activities": manifest, "errors": errors}
