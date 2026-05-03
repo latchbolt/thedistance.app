@@ -10,12 +10,14 @@
 <script webc:bucket="components">
   class ImportWizard extends HTMLElement {
     connectedCallback() {
+      this.user = null;
+
       document.addEventListener("afterAuthCheck", (e) => {
         const { user } = e.detail;
 
         if (!user) {
           this.dropZone.showError(
-            "<a href=’/login’>Log in</a> to upload Activities"
+            "<a href=’/login’>Log in</a> to import activities"
           );
           return;
         }
@@ -23,10 +25,68 @@
         this.user = user;
         this.dropZone.enable();
       });
+
+      this.addEventListener("files-selected", (e) => {
+        this.handleUpload(e.detail.files);
+      });
     }
 
     get dropZone() {
       return this.querySelector("file-drop-zone");
+    }
+
+    async handleUpload(files) {
+      const file = files[0];
+
+      if (!file.name.toLowerCase().endsWith(".zip")) {
+        this.dropZone.showError("Please upload a .zip file");
+        return;
+      }
+
+      this.dropZone.clearMessages();
+      this.dropZone.showStatus("Running up that hill…");
+      this.dropZone.disable();
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch(`${API_BASE}/api/import/strava`, {
+          ...FETCH_OPTS,
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          this.dropZone.showError(err.error || "Upload failed");
+          this.dropZone.enable();
+          return;
+        }
+
+        const { job_id } = await res.json();
+
+        /*
+          NOTE: The POST to import responds very quick, almost instance, because
+          we don't do much work. The timeouts below just slow down the UI a bit
+          to give the user an idea that *something* is happening. It's also
+          likely that the import preview is complete or near complete by the
+          time we redirect to the import job page.
+        */
+        setTimeout(() => {
+          this.dropZone.showStatus(
+            "Import job created, redirecting…",
+            "success"
+          );
+        }, 2000);
+
+        setTimeout(() => {
+          window.location.href = `/account/imports/${job_id}`;
+        }, 3000);
+      } catch (err) {
+        this.dropZone.showError(err.message);
+        this.dropZone.enable();
+      }
     }
   }
 
