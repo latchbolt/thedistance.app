@@ -80,6 +80,11 @@
           background: var(--color-accent-error);
         }
 
+        &.success {
+          background: var(--color-accent-success);
+          color: hsl(var(--color-foreground-hsl-light));
+        }
+
         &.placeholder {
           opacity: 0;
         }
@@ -122,7 +127,7 @@
             new CustomEvent("files-selected", {
               detail: { files },
               bubbles: true,
-            }),
+            })
           );
         }
       });
@@ -133,7 +138,7 @@
             new CustomEvent("files-selected", {
               detail: { files: fileInput.files },
               bubbles: true,
-            }),
+            })
           );
         }
       });
@@ -157,8 +162,10 @@
       this.messagesContainer.innerHTML = `<p class="error">${message}</p>`;
     }
 
-    showStatus(message) {
-      this.messagesContainer.innerHTML = `<p class="status">${message}</p>`;
+    showStatus(message, className) {
+      this.messagesContainer.innerHTML = `<p class="status ${
+        className || ""
+      }">${message}</p>`;
     }
 
     clearMessages() {
