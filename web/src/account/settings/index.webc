@@ -1,0 +1,30 @@
+---
+layout: layout.webc
+title: Settings - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <h2>Settings</h2>
+    </header>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+</style>
+
+<script webc:bucket="components">
+  document.addEventListener("afterAuthCheck", (e) => {
+    if (!e.detail.user) {
+      window.location.href = "/login";
+    }
+  });
+</script>

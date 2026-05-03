@@ -1,0 +1,117 @@
+---
+layout: layout.webc
+title: Imports - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <a href="/account/">Back</a>
+      <h2>Imports</h2>
+      <a href="/import">New</a>
+    </header>
+    <div id="import-jobs"></div>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+
+  .job-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .job-list a {
+    border: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    padding: 1rem;
+    text-decoration: none;
+    color: inherit;
+
+    &:hover,
+    &:focus-visible {
+      border-color: var(--color-accent-primary);
+    }
+  }
+
+  .job-source {
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+
+  .job-status {
+    font-size: var(--font-size-0_75);
+    text-transform: uppercase;
+  }
+
+  .job-stats {
+    font-size: var(--font-size-0_75);
+    display: flex;
+    gap: 1rem;
+  }
+</style>
+
+<script webc:bucket="components">
+  document.addEventListener("afterAuthCheck", async (e) => {
+    const { user } = e.detail;
+    const container = document.getElementById("import-jobs");
+
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/import/jobs`, FETCH_OPTS);
+      if (!res.ok) {
+        container.innerHTML = "<p>Failed to load imports</p>";
+        return;
+      }
+
+      const jobs = await res.json();
+
+      if (jobs.length === 0) {
+        container.innerHTML = "<p>No imports yet</p>";
+        return;
+      }
+
+      container.innerHTML = `<ul class="job-list">
+        ${jobs
+          .map((job) => {
+            const date = formatDate(job.created_at);
+            return `<li>
+              <a href="/account/imports/${job.id}">
+                <span class="job-source">${job.source}</span>
+                <span class="job-status">${job.status}</span>
+                <time datetime="${job.created_at}">${date}</time>
+                <span class="job-stats">
+                  <span>${job.total} activities</span>
+                  ${
+                    job.duplicates
+                      ? `<span>${job.duplicates} duplicates</span>`
+                      : ""
+                  }
+                </span>
+              </a>
+            </li>`;
+          })
+          .join("")}
+      </ul>`;
+    } catch (err) {
+      container.innerHTML = "<p>Failed to load imports</p>";
+    }
+  });
+</script>

@@ -1,0 +1,120 @@
+---
+layout: layout.webc
+title: Import - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <a href="/account/imports/">Back</a>
+      <h2>Import</h2>
+    </header>
+    <div id="job-detail"></div>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+</style>
+
+<script webc:bucket="components">
+  const jobPathMatch = window.location.pathname.match(
+    /\/account\/imports\/([^/]+)/
+  );
+  const jobId = jobPathMatch ? jobPathMatch[1] : null;
+
+  if (jobId) {
+    document.addEventListener("afterAuthCheck", async (e) => {
+      if (!e.detail.user) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const container = document.getElementById("job-detail");
+
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/import/jobs/${encodeURIComponent(jobId)}`,
+          FETCH_OPTS
+        );
+
+        if (!res.ok) {
+          container.innerHTML = "<p>Import not found</p>";
+          return;
+        }
+
+        const job = await res.json();
+        container.innerHTML = `
+          <p>Source: ${job.source}</p>
+          <p>Status: <span id="job-status">${job.status}</span></p>
+          <time datetime="${job.created_at}">${formatDate(
+          job.created_at
+        )}</time>
+        `;
+
+        if (job.status === "processing") {
+          subscribeToEvents();
+        } else if (job.status === "preview") {
+          showManifest({
+            activities: job.manifest,
+            total: job.total,
+            duplicates: job.duplicates,
+          });
+        }
+      } catch (err) {
+        container.innerHTML = "<p>Failed to load import</p>";
+      }
+    });
+  }
+
+  function showManifest(manifest) {
+    console.log("Manifest:", manifest);
+
+    const el = document.getElementById("job-status");
+    if (el) el.textContent = "preview";
+
+    const container = document.getElementById("job-detail");
+    container.insertAdjacentHTML(
+      "beforeend",
+      `<p>${manifest.total} activities found, ${manifest.duplicates} duplicates</p>`
+    );
+  }
+
+  function subscribeToEvents() {
+    const source = new EventSource(
+      `${API_BASE}/api/import/jobs/${encodeURIComponent(jobId)}/events`,
+      { withCredentials: true }
+    );
+
+    source.addEventListener("status", (e) => {
+      const { status } = JSON.parse(e.data);
+      const el = document.getElementById("job-status");
+      if (el) el.textContent = status;
+    });
+
+    source.addEventListener("manifest", (e) => {
+      showManifest(JSON.parse(e.data));
+      source.close();
+    });
+
+    source.addEventListener("failed", (e) => {
+      const { errors } = JSON.parse(e.data);
+      console.error("Import failed:", errors);
+
+      const el = document.getElementById("job-status");
+      if (el) el.textContent = "failed";
+
+      source.close();
+    });
+
+    source.addEventListener("error", () => {
+      source.close();
+    });
+  }
+</script>
