@@ -578,8 +578,8 @@ def complete_import_job(conn, job_id, status="completed"):
 def list_import_jobs_for_user(conn, did, limit=10):
     return conn.execute(
         """
-        SELECT id, did, status, total, imported, skipped, failed, errors,
-               created_at, completed_at
+        SELECT id, did, source, status, total, duplicates, imported, skipped,
+               failed, errors, created_at, completed_at
         FROM import_jobs
         WHERE did = %s
         ORDER BY created_at DESC

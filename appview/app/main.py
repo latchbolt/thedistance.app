@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from urllib.parse import urlencode, urlparse
@@ -6,7 +7,7 @@ import httpx
 from authlib.jose import JsonWebKey
 from fastapi import BackgroundTasks, Depends, FastAPI, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import require_auth
@@ -15,11 +16,13 @@ from app.config import get_settings
 from app.db import (
     create_import_job,
     delete_activity,
+    get_import_job_for_user,
     delete_auth_request,
     delete_oauth_session,
     get_auth_request,
     get_connection,
     init_db,
+    list_import_jobs_for_user,
     save_auth_request,
     save_oauth_session,
     set_import_job_manifest,
@@ -235,6 +238,84 @@ async def parse_files(
 
 
 # --- Import endpoints ---
+
+@app.get("/api/import/jobs")
+def list_import_jobs(session: dict = Depends(require_auth)):
+    conn = get_connection()
+    try:
+        rows = list_import_jobs_for_user(conn, session["did"])
+        return [row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get("/api/import/jobs/{job_id}")
+def get_import_job(job_id: str, session: dict = Depends(require_auth)):
+    conn = get_connection()
+    try:
+        row = get_import_job_for_user(conn, job_id, session["did"])
+        if not row:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        return row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@app.get("/api/import/jobs/{job_id}/events")
+async def import_job_events(job_id: str, session: dict = Depends(require_auth)):
+    conn = get_connection()
+    try:
+        row = get_import_job_for_user(conn, job_id, session["did"])
+        if not row:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+    finally:
+        conn.close()
+
+    async def event_stream():
+        last_status = None
+
+        while True:
+            conn = get_connection()
+            try:
+                row = get_import_job_for_user(conn, job_id, session["did"])
+            finally:
+                conn.close()
+
+            if not row:
+                yield sse_event("error", {"error": "Job not found"})
+                return
+
+            job = row_to_dict(row)
+            status = job["status"]
+
+            if status != last_status:
+                yield sse_event("status", {"status": status})
+                last_status = status
+
+            if status == "preview":
+                yield sse_event("manifest", {
+                    "activities": job["manifest"],
+                    "total": job["total"],
+                    "duplicates": job["duplicates"],
+                })
+                return
+
+            if status == "failed":
+                yield sse_event("failed", {"errors": job["errors"]})
+                return
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
 
 @app.post("/api/import/strava")
 async def strava_preview(
