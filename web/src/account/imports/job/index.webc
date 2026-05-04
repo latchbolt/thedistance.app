@@ -9,7 +9,8 @@ title: Import - The Distance
       <a href="/account/imports/">Back</a>
       <h2>Import</h2>
     </header>
-    <div id="job-detail"></div>
+    <div id="job-summary"></div>
+    <div id="activities"></div>
   </div>
 </div>
 
@@ -19,7 +20,164 @@ title: Import - The Distance
     display: flex;
     flex-direction: column;
     padding: 1rem 0;
-    row-gap: 3rem;
+    row-gap: 2rem;
+  }
+
+  .import-meta {
+    align-items: center;
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .job-status {
+    border-radius: 16px;
+    color: white;
+    display: inline-block;
+    font-size: var(--font-size-0_5);
+    font-weight: 600;
+    padding: 0.1em 0.65em;
+    text-align: center;
+    text-transform: uppercase;
+
+    &.processing {
+      background: var(--color-accent-primary);
+      color: hsl(var(--color-foreground-hsl-light));
+    }
+
+    &.preview {
+      background: hsl(var(--color-accent-foreground-hsl-dark));
+    }
+
+    &.failed {
+      background: var(--color-accent-error);
+    }
+
+    &.success {
+      background: var(--color-accent-success);
+      color: hsl(var(--color-foreground-hsl-light));
+    }
+  }
+
+  #job-summary {
+    font-size: var(--font-size-1_5);
+    max-width: var(--grid-max-5);
+  }
+
+  #activities {
+    --b: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
+    --r: 20px;
+  }
+
+  #activities ul {
+    background: var(--color-background);
+    border-left: var(--b);
+    border-right: var(--b);
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .import-footer {
+    background-color: var(--color-background);
+    bottom: 0;
+    padding-bottom: 1.5rem;
+    position: sticky;
+
+    .inner {
+      border-radius: 0 0 var(--r) var(--r);
+      border: var(--b);
+      padding: 0.75rem;
+    }
+  }
+
+  .import-header {
+    background-color: var(--color-background);
+    position: sticky;
+    padding-top: 0.5rem;
+    top: 0;
+  }
+
+  .activity-header-row {
+    border: var(--b);
+    border-radius: var(--r) var(--r) 0 0;
+    display: flex;
+    flex: 1;
+    font-size: var(--font-size-0_75);
+
+    & > * {
+      padding: 0.5rem;
+      flex: 1;
+      text-align: right;
+    }
+
+    & > div:first-child {
+      flex: 0;
+    }
+
+    .activity-title {
+      padding-left: 1.25rem;
+      text-align: left;
+    }
+  }
+
+  .activity-row {
+    border-bottom: var(--b);
+    font-size: var(--font-size-0_75);
+    line-height: 1;
+    list-style: none;
+
+    &:last-child {
+      border-bottom: 0;
+    }
+
+    label {
+      cursor: pointer;
+      display: flex;
+
+      &:hover {
+        background-color: color-mix(
+          in srgb,
+          var(--color-accent-foreground) 8%,
+          transparent
+        );
+      }
+
+      &:not(:has(input:checked)) .activity-contents > * {
+        color: color-mix(in srgb, currentColor 30%, transparent);
+      }
+    }
+
+    .input-container {
+      border-right: var(--b);
+      padding: 0.5rem;
+      padding-top: 0.6rem;
+    }
+  }
+
+  .activity-title,
+  .activity-time {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .activity-title {
+    text-align: left;
+    width: 25ch;
+  }
+
+  .activity-time {
+    max-width: 18ch;
+  }
+
+  .activity-contents {
+    display: flex;
+    flex: 1;
+    text-align: right;
+
+    & > * {
+      padding: 0.5rem;
+      flex: 1;
+    }
   }
 </style>
 
@@ -36,7 +194,7 @@ title: Import - The Distance
         return;
       }
 
-      const container = document.getElementById("job-detail");
+      const header = document.querySelector(".contents header");
 
       try {
         const res = await fetch(
@@ -45,18 +203,23 @@ title: Import - The Distance
         );
 
         if (!res.ok) {
-          container.innerHTML = "<p>Import not found</p>";
+          header.insertAdjacentHTML("beforeend", "<p>Import not found</p>");
           return;
         }
 
         const job = await res.json();
-        container.innerHTML = `
-          <p>Source: ${job.source}</p>
-          <p>Status: <span id="job-status">${job.status}</span></p>
-          <time datetime="${job.created_at}">${formatDate(
-          job.created_at
-        )}</time>
-        `;
+        header.querySelector("h2").innerHTML = `${capitalize(
+          job.source
+        )} Import`;
+
+        header.insertAdjacentHTML(
+          "beforeend",
+          `<div class="import-meta"><span class="job-status ${job.status}">${
+            job.status
+          }</span><time datetime="${job.created_at}">${formatDate(
+            job.created_at
+          )}</time></div>`
+        );
 
         if (job.status === "processing") {
           subscribeToEvents();
@@ -68,22 +231,70 @@ title: Import - The Distance
           });
         }
       } catch (err) {
-        container.innerHTML = "<p>Failed to load import</p>";
+        header.insertAdjacentHTML("beforeend", "<p>Error loading import</p>");
+        console.warn(err);
       }
     });
   }
 
   function showManifest(manifest) {
-    console.log("Manifest:", manifest);
+    const container = document.getElementById("job-summary");
+    container.innerHTML = `<p><b>${manifest.total}</b> total Activities found. Of those, <b>${manifest.duplicates}</b> look like duplicates and were deselected. We’ll only import selected Activities.</p>`;
 
-    const el = document.getElementById("job-status");
-    if (el) el.textContent = "preview";
+    renderActivities(manifest.activities);
+  }
 
-    const container = document.getElementById("job-detail");
-    container.insertAdjacentHTML(
-      "beforeend",
-      `<p>${manifest.total} activities found, ${manifest.duplicates} duplicates</p>`
-    );
+  function renderActivities(activities) {
+    const html = activities.reduce((str, obj) => {
+      const a = obj.activity;
+      const fmtDate = formatDate(a.started_at);
+
+      const nextStr = `
+        <li id="activity-${obj.activity_id}" class="activity-row">
+          <label>
+            <div class="input-container">
+              <input type="checkbox" name="${obj.activity_id}" ${
+        !obj.duplicate ? "checked" : ""
+      } />
+            </div>
+            <div class="activity-contents">
+              <p class="activity-title"><b>${a.title}</b></p>
+              <time class="activity-time" datetime="${
+                a.started_at
+              }" title="${fmtDate}">${fmtDate}</time>
+              <p>${formatDuration(a.moving_time)}</p>
+
+              <p>${
+                a.distance !== "0" ? `${metersToMiles(a.distance)} mi` : "-"
+              }</p>
+              <p>${
+                a.elevation_gain ? `${metersToFeet(a.elevation_gain)} ft` : "-"
+              }</p>
+            </div>
+          </label>
+        </li>
+      `;
+      return str + nextStr;
+    }, "");
+
+    const container = document.getElementById("activities");
+    container.innerHTML = `
+      <div class="import-header">
+        <div class="activity-header-row">
+          <div>&nbsp;</div>
+          <div class="activity-title">Title</div>
+          <div class="activity-time">Date</div>
+          <div>Moving Time</div>
+          <div>Distance</div>
+          <div>Elev Gain</div>
+        </div>
+      </div>
+      <ul>${html}</ul>
+      <div class="import-footer">
+        <div class="inner">
+          <button type="button" class="btn">Import 189 Activities</button>
+        </div>
+      </div>`;
   }
 
   function subscribeToEvents() {
@@ -94,8 +305,11 @@ title: Import - The Distance
 
     source.addEventListener("status", (e) => {
       const { status } = JSON.parse(e.data);
-      const el = document.getElementById("job-status");
-      if (el) el.textContent = status;
+      const el = document.querySelector(".job-status");
+      if (el) {
+        el.className = `job-status ${status}`;
+        el.textContent = status;
+      }
     });
 
     source.addEventListener("manifest", (e) => {
@@ -107,8 +321,11 @@ title: Import - The Distance
       const { errors } = JSON.parse(e.data);
       console.error("Import failed:", errors);
 
-      const el = document.getElementById("job-status");
-      if (el) el.textContent = "failed";
+      const el = document.querySelector(".job-status");
+      if (el) {
+        el.className = "job-status failed";
+        el.textContent = "failed";
+      }
 
       source.close();
     });
