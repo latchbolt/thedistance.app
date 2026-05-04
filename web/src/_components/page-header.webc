@@ -13,7 +13,7 @@
 
   <div class="controls">
     <nav id="page-header-nav">
-      <a :href="loginHref" class="btn" id="page-header-auth-btn"
+      <a :href="loginHref" class="auth-btn" id="page-header-auth-btn"
         >Log in / Join</a
       >
     </nav>
@@ -28,7 +28,7 @@
     localStorage.removeItem("auth:user");
 
     const nav = document.getElementById("page-header-nav");
-    nav.innerHTML = `<a :href="/" class="btn" id="page-header-auth-btn">Log in / Join</a>`;
+    nav.innerHTML = `<a :href="/" class="header-btn" id="page-header-auth-btn">Log in / Join</a>`;
 
     try {
       await fetch(`${API_BASE}/oauth/logout`, {
@@ -46,7 +46,7 @@
     return `
       <a href="/profile/${handle}"><b class="at">@</b>${handle}</a>
       <button id="logout-btn" type="button">Log out</button> 
-      <a href="/add-activities" class="btn">
+      <a href="/add-activities" class="header-btn">
         New
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0M9 12h6M12 9v6"/></svg>
       </a>`;
@@ -166,7 +166,7 @@
     }
   }
 
-  .btn {
+  .header-btn {
     background: var(--color-accent-primary);
     color: hsl(var(--color-foreground-hsl-light));
     font-weight: 500;

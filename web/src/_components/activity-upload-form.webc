@@ -44,6 +44,7 @@
     flex: 1;
   }
 
+  /* FIXME: This can use some/all of the global btn class */
   .btn {
     align-items: center;
     appearance: none;
@@ -107,7 +108,7 @@
 
         if (!user) {
           this.dropZone.showError(
-            "<a href=’/login’>Log in</a> to upload Activities",
+            "<a href=’/login’>Log in</a> to upload Activities"
           );
           return;
         }
