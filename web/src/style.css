@@ -255,4 +255,39 @@ sup {
   .hidden {
     opacity: 0;
   }
+
+  &[disabled] {
+    cursor: not-allowed;
+  }
+}
+
+.job-status {
+  border-radius: 16px;
+  color: white;
+  display: inline-block;
+  font-size: var(--font-size-0_5);
+  font-weight: 600;
+  padding: 0.1em 0.65em;
+  text-align: center;
+  text-transform: uppercase;
+
+  &.processing,
+  &.importing {
+    background: var(--color-accent-primary);
+    color: hsl(var(--color-foreground-hsl-light));
+  }
+
+  &.preview {
+    background: hsl(var(--color-accent-foreground-hsl-dark));
+  }
+
+  &.failed {
+    background: var(--color-accent-error);
+  }
+
+  &.success,
+  &.completed {
+    background: var(--color-accent-success);
+    color: hsl(var(--color-foreground-hsl-light));
+  }
 }

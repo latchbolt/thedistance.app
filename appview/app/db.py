@@ -531,6 +531,14 @@ def set_import_job_manifest(conn, job_id, manifest, total, duplicates=0):
     conn.commit()
 
 
+def update_import_job_manifest(conn, job_id, manifest):
+    conn.execute(
+        "UPDATE import_jobs SET manifest = %s WHERE id = %s",
+        (psycopg.types.json.Json(manifest), job_id),
+    )
+    conn.commit()
+
+
 def get_import_job_for_user(conn, job_id, did):
     return conn.execute(
         "SELECT * FROM import_jobs WHERE id = %s AND did = %s", (job_id, did)

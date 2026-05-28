@@ -95,7 +95,7 @@ title: Imports - The Distance
             return `<li>
               <a href="/account/imports/${job.id}">
                 <span class="job-source">${job.source}</span>
-                <span class="job-status">${job.status}</span>
+                <span class="job-status ${job.status}">${job.status}</span>
                 <time datetime="${job.created_at}">${date}</time>
                 <span class="job-stats">
                   <span>${job.total} activities</span>

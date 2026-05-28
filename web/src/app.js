@@ -205,6 +205,10 @@ function formatDate(iso) {
   });
 }
 
+function pluralize(n, singular, plural) {
+  return n === 1 ? singular : plural;
+}
+
 function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }

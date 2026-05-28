@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -14,9 +15,11 @@ from app.auth import require_auth
 from app.backfill import backfill as run_backfill
 from app.config import get_settings
 from app.db import (
+    complete_import_job,
     create_import_job,
     delete_activity,
     get_import_job_for_user,
+    get_oauth_session,
     delete_auth_request,
     delete_oauth_session,
     get_auth_request,
@@ -26,6 +29,8 @@ from app.db import (
     save_auth_request,
     save_oauth_session,
     set_import_job_manifest,
+    update_import_job_manifest,
+    update_import_job_progress,
     update_import_job_status,
     update_oauth_session_pds_nonce,
     update_oauth_session_tokens,
@@ -96,10 +101,12 @@ def compute_client_id(app_url: str) -> tuple[str, str]:
     parsed = urlparse(app_url)
     if parsed.hostname == "127.0.0.1":
         redirect_uri = f"http://127.0.0.1:{parsed.port}/oauth/callback"
-        client_id = "http://localhost?" + urlencode({
-            "redirect_uri": redirect_uri,
-            "scope": OAUTH_SCOPE,
-        })
+        client_id = "http://localhost?" + urlencode(
+            {
+                "redirect_uri": redirect_uri,
+                "scope": OAUTH_SCOPE,
+            }
+        )
     else:
         url = app_url.rstrip("/")
         redirect_uri = f"{url}/oauth/callback"
@@ -117,6 +124,7 @@ def startup():
 
 
 # --- Activity endpoints ---
+
 
 @app.get("/api/activities")
 def list_activities(
@@ -161,6 +169,7 @@ def get_activity_endpoint(did: str, rkey: str):
 
 # --- Backfill endpoint ---
 
+
 @app.post("/api/backfill")
 def backfill_endpoint(
     req: dict,
@@ -187,6 +196,7 @@ def backfill_endpoint(
 
 # --- Identity endpoints ---
 
+
 @app.get("/api/resolve/{handle}")
 def resolve_handle_endpoint(handle: str):
     with httpx.Client() as client:
@@ -207,6 +217,7 @@ def resolve_handle_endpoint(handle: str):
 
 
 # --- File parsing endpoints ---
+
 
 @app.post("/api/parse")
 async def parse_files(
@@ -238,6 +249,7 @@ async def parse_files(
 
 
 # --- Import endpoints ---
+
 
 @app.get("/api/import/jobs")
 def list_import_jobs(session: dict = Depends(require_auth)):
@@ -297,11 +309,38 @@ async def import_job_events(job_id: str, session: dict = Depends(require_auth)):
                 last_status = status
 
             if status == "preview":
-                yield sse_event("manifest", {
-                    "activities": job["manifest"],
-                    "total": job["total"],
-                    "duplicates": job["duplicates"],
-                })
+                yield sse_event(
+                    "manifest",
+                    {
+                        "activities": job["manifest"],
+                        "total": job["total"],
+                        "duplicates": job["duplicates"],
+                    },
+                )
+                return
+
+            if status == "importing":
+                yield sse_event(
+                    "progress",
+                    {
+                        "imported": job["imported"],
+                        "skipped": job["skipped"],
+                        "failed": job["failed"],
+                        "total": job["total"],
+                    },
+                )
+
+            if status == "completed":
+                yield sse_event(
+                    "completed",
+                    {
+                        "imported": job["imported"],
+                        "skipped": job["skipped"],
+                        "failed": job["failed"],
+                        "errors": job["errors"],
+                        "manifest": job["manifest"],
+                    },
+                )
                 return
 
             if status == "failed":
@@ -324,7 +363,9 @@ async def strava_preview(
     session: dict = Depends(require_auth),
 ):
     if not file.filename or not file.filename.lower().endswith(".zip"):
-        return JSONResponse(status_code=400, content={"error": "Please upload a .zip file"})
+        return JSONResponse(
+            status_code=400, content={"error": "Please upload a .zip file"}
+        )
 
     zip_data = await file.read()
 
@@ -340,7 +381,9 @@ async def strava_preview(
                     content={"error": "No activities.csv found in zip"},
                 )
     except zipfile.BadZipFile:
-        return JSONResponse(status_code=400, content={"error": "File is not a valid zip archive"})
+        return JSONResponse(
+            status_code=400, content={"error": "File is not a valid zip archive"}
+        )
 
     job_id = generate_tid()
     did = session["did"]
@@ -371,7 +414,136 @@ def process_strava_export_job(job_id: str, zip_data: bytes, did: str):
         conn.close()
 
 
+@app.post("/api/import/strava/run")
+def strava_run(
+    req: dict,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    job_id = req.get("job_id")
+    selected = req.get("selected")
+    dry_run = req.get("dry_run", False)
+
+    if not job_id or selected is None:
+        return JSONResponse(
+            status_code=400, content={"error": "job_id and selected are required"}
+        )
+
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] != "preview":
+            return JSONResponse(
+                status_code=400, content={"error": "Job is not in preview state"}
+            )
+
+        update_import_job_status(conn, job_id, "importing")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(
+        run_strava_import, job_id, session["did"], selected, dry_run
+    )
+
+    return {"job_id": job_id}
+
+
+def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, did)
+        if not job or not job["manifest"]:
+            update_import_job_status(conn, job_id, "failed")
+            return
+
+        manifest = job["manifest"]
+        imported = 0
+        skipped = 0
+        failed = 0
+        errors = []
+
+        for idx, item in enumerate(manifest):
+            if idx not in selected:
+                skipped += 1
+                update_import_job_progress(conn, job_id, imported, skipped, failed)
+                continue
+
+            activity = item["activity"]
+            record = {to_camel_case(k): v for k, v in activity.items()}
+
+            if dry_run:
+                # FIXME: Remove this delay when done testing. Simulates PDS round-trip.
+                time.sleep(0.1)
+                manifest[idx]["imported"] = True
+                imported += 1
+                update_import_job_progress(conn, job_id, imported, skipped, failed)
+                continue
+
+            session = get_oauth_session(conn, did)
+            if not session:
+                errors.append({"index": idx, "error": "Session expired"})
+                failed += 1
+                update_import_job_progress(
+                    conn, job_id, imported, skipped, failed, errors
+                )
+                break
+
+            rkey = generate_tid()
+            pds_url = session["pds_url"]
+            url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
+            body = {
+                "repo": did,
+                "collection": "app.thedistance.activity",
+                "rkey": rkey,
+                "record": record,
+            }
+
+            try:
+                with httpx.Client() as client:
+                    resp, dpop_pds_nonce = pds_authed_request(
+                        client=client,
+                        method="POST",
+                        url=url,
+                        session=session,
+                        body=body,
+                    )
+                update_oauth_session_pds_nonce(conn, did, dpop_pds_nonce)
+
+                if resp.status_code in [200, 201]:
+                    upsert_activity(conn, did, rkey, record)
+                    manifest[idx]["rkey"] = rkey
+                    manifest[idx]["did"] = did
+                    manifest[idx]["imported"] = True
+                    imported += 1
+                else:
+                    log.error(
+                        "PDS create error for job %s idx %d: %s", job_id, idx, resp.text
+                    )
+                    errors.append({"index": idx, "error": "PDS create failed"})
+                    failed += 1
+            except Exception as e:
+                log.exception("Failed to import activity %d in job %s", idx, job_id)
+                errors.append({"index": idx, "error": str(e)})
+                failed += 1
+
+            update_import_job_progress(
+                conn, job_id, imported, skipped, failed, errors if errors else None
+            )
+
+        update_import_job_manifest(conn, job_id, manifest)
+        complete_import_job(conn, job_id)
+    except Exception:
+        log.exception("Import run %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
+
+
 # --- Record management endpoints ---
+
 
 def to_camel_case(s):
     parts = s.split("_")
@@ -385,11 +557,19 @@ def create_activity_endpoint(
 ):
     record = {to_camel_case(k): v for k, v in req.items()}
 
-    required = ["sportType", "startedAt", "elapsedTime", "movingTime", "distance", "createdAt"]
+    required = [
+        "sportType",
+        "startedAt",
+        "elapsedTime",
+        "movingTime",
+        "distance",
+        "createdAt",
+    ]
     missing = [f for f in required if f not in record]
     if missing:
         return JSONResponse(
-            status_code=400, content={"error": f"Missing required fields: {', '.join(missing)}"}
+            status_code=400,
+            content={"error": f"Missing required fields: {', '.join(missing)}"},
         )
 
     rkey = generate_tid()
@@ -405,7 +585,11 @@ def create_activity_endpoint(
     try:
         with httpx.Client() as client:
             resp, dpop_pds_nonce = pds_authed_request(
-                client=client, method="POST", url=url, session=session, body=body,
+                client=client,
+                method="POST",
+                url=url,
+                session=session,
+                body=body,
             )
     except httpx.TimeoutException:
         log.error("PDS request timed out for %s", session["did"])
@@ -424,7 +608,9 @@ def create_activity_endpoint(
 
     if resp.status_code not in [200, 201]:
         log.error("PDS create error: %s", resp.text)
-        return JSONResponse(status_code=resp.status_code, content={"error": "PDS create failed"})
+        return JSONResponse(
+            status_code=resp.status_code, content={"error": "PDS create failed"}
+        )
 
     return {"status": "created", "rkey": rkey, "did": session["did"]}
 
@@ -436,7 +622,9 @@ def delete_activity_endpoint(
     session: dict = Depends(require_auth),
 ):
     if did != session["did"]:
-        return JSONResponse(status_code=403, content={"error": "You can only delete your own records"})
+        return JSONResponse(
+            status_code=403, content={"error": "You can only delete your own records"}
+        )
 
     pds_url = session["pds_url"]
     url = f"{pds_url}/xrpc/com.atproto.repo.deleteRecord"
@@ -449,7 +637,11 @@ def delete_activity_endpoint(
     try:
         with httpx.Client() as client:
             resp, dpop_pds_nonce = pds_authed_request(
-                client=client, method="POST", url=url, session=session, body=body,
+                client=client,
+                method="POST",
+                url=url,
+                session=session,
+                body=body,
             )
     except httpx.TimeoutException:
         log.error("PDS request timed out for %s", session["did"])
@@ -468,12 +660,15 @@ def delete_activity_endpoint(
 
     if resp.status_code not in [200, 201]:
         log.error("PDS delete error: %s", resp.text)
-        return JSONResponse(status_code=resp.status_code, content={"error": "PDS delete failed"})
+        return JSONResponse(
+            status_code=resp.status_code, content={"error": "PDS delete failed"}
+        )
 
     return {"status": "deleted"}
 
 
 # --- OAuth endpoints ---
+
 
 @app.get("/oauth-client-metadata.json")
 def oauth_client_metadata():
@@ -577,8 +772,15 @@ def oauth_login(req: dict):
     conn = get_connection()
     try:
         save_auth_request(
-            conn, state, authserver_meta["issuer"], did, handle, pds_url,
-            pkce_verifier, OAUTH_SCOPE, dpop_authserver_nonce,
+            conn,
+            state,
+            authserver_meta["issuer"],
+            did,
+            handle,
+            pds_url,
+            pkce_verifier,
+            OAUTH_SCOPE,
+            dpop_authserver_nonce,
             dpop_private_jwk.as_json(is_private=True),
         )
     finally:
@@ -586,7 +788,9 @@ def oauth_login(req: dict):
 
     auth_url = authserver_meta["authorization_endpoint"]
     if not is_safe_url(auth_url):
-        return JSONResponse(status_code=400, content={"error": "Unsafe authorization URL"})
+        return JSONResponse(
+            status_code=400, content={"error": "Unsafe authorization URL"}
+        )
     qparam = urlencode({"client_id": client_id, "request_uri": par_request_uri})
     return {"redirect_url": f"{auth_url}?{qparam}"}
 
@@ -606,13 +810,17 @@ def oauth_callback(request: Request):
     code = request.query_params.get("code")
 
     if not all([state, authserver_iss, code]):
-        return JSONResponse(status_code=400, content={"error": "Missing callback parameters"})
+        return JSONResponse(
+            status_code=400, content={"error": "Missing callback parameters"}
+        )
 
     conn = get_connection()
     try:
         auth_req = get_auth_request(conn, state)
         if not auth_req:
-            return JSONResponse(status_code=400, content={"error": "OAuth request not found"})
+            return JSONResponse(
+                status_code=400, content={"error": "OAuth request not found"}
+            )
 
         delete_auth_request(conn, state)
 
@@ -641,32 +849,43 @@ def oauth_callback(request: Request):
                 pds_url = auth_req["pds_url"]
                 if tokens["sub"] != did:
                     return JSONResponse(
-                        status_code=400, content={"error": "DID mismatch in token response"}
+                        status_code=400,
+                        content={"error": "DID mismatch in token response"},
                     )
             else:
                 did = tokens["sub"]
                 if not is_valid_did(did):
                     return JSONResponse(
-                        status_code=400, content={"error": "Invalid DID in token response"}
+                        status_code=400,
+                        content={"error": "Invalid DID in token response"},
                     )
                 did, handle, pds_url = resolve_identity(client, did)
                 verified_authserver = resolve_pds_authserver(client, pds_url)
                 if verified_authserver != authserver_iss:
                     return JSONResponse(
-                        status_code=400, content={"error": "Authorization server mismatch"}
+                        status_code=400,
+                        content={"error": "Authorization server mismatch"},
                     )
 
             profile = fetch_profile(client, did, pds_url)
 
         save_oauth_session(
-            conn, did, handle, pds_url, authserver_iss,
-            tokens["access_token"], tokens["refresh_token"],
-            dpop_authserver_nonce, auth_req["dpop_private_jwk"],
+            conn,
+            did,
+            handle,
+            pds_url,
+            authserver_iss,
+            tokens["access_token"],
+            tokens["refresh_token"],
+            dpop_authserver_nonce,
+            auth_req["dpop_private_jwk"],
         )
 
         if profile:
             upsert_profile(
-                conn, did, handle,
+                conn,
+                did,
+                handle,
                 profile["display_name"],
                 profile["description"],
                 profile["avatar_url"],
@@ -679,7 +898,9 @@ def oauth_callback(request: Request):
     request.session["user_did"] = did
     request.session["user_handle"] = handle
 
-    return RedirectResponse(url=f"{settings.frontend_url}/profile/{handle}", status_code=302)
+    return RedirectResponse(
+        url=f"{settings.frontend_url}/profile/{handle}", status_code=302
+    )
 
 
 @app.post("/oauth/refresh")
@@ -697,8 +918,10 @@ def oauth_refresh(request: Request, session: dict = Depends(require_auth)):
     conn = get_connection()
     try:
         update_oauth_session_tokens(
-            conn, session["did"],
-            tokens["access_token"], tokens["refresh_token"],
+            conn,
+            session["did"],
+            tokens["access_token"],
+            tokens["refresh_token"],
             dpop_authserver_nonce,
         )
     finally:

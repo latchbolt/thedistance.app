@@ -10,7 +10,18 @@ title: Import - The Distance
       <h2>Import</h2>
     </header>
     <div id="job-summary"></div>
-    <div id="activities"></div>
+    <div id="activities" class="activities">
+      <div class="import-header">
+        <div class="activity-header-row">
+          <div>&nbsp;</div>
+          <div class="activity-title">Title</div>
+          <div class="activity-time">Date</div>
+          <div>Moving Time</div>
+          <div>Distance</div>
+          <div>Elev Gain</div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -29,46 +40,17 @@ title: Import - The Distance
     gap: 0.25rem;
   }
 
-  .job-status {
-    border-radius: 16px;
-    color: white;
-    display: inline-block;
-    font-size: var(--font-size-0_5);
-    font-weight: 600;
-    padding: 0.1em 0.65em;
-    text-align: center;
-    text-transform: uppercase;
-
-    &.processing {
-      background: var(--color-accent-primary);
-      color: hsl(var(--color-foreground-hsl-light));
-    }
-
-    &.preview {
-      background: hsl(var(--color-accent-foreground-hsl-dark));
-    }
-
-    &.failed {
-      background: var(--color-accent-error);
-    }
-
-    &.success {
-      background: var(--color-accent-success);
-      color: hsl(var(--color-foreground-hsl-light));
-    }
-  }
-
   #job-summary {
     font-size: var(--font-size-1_5);
     max-width: var(--grid-max-5);
   }
 
-  #activities {
+  .activities {
     --b: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
     --r: 20px;
   }
 
-  #activities ul {
+  .activities ul {
     background: var(--color-background);
     border-left: var(--b);
     border-right: var(--b);
@@ -96,6 +78,13 @@ title: Import - The Distance
     top: 0;
   }
 
+  [data-status="processing"],
+  [data-status="failed"] {
+    .import-header {
+      display: none;
+    }
+  }
+
   .activity-header-row {
     border: var(--b);
     border-radius: var(--r) var(--r) 0 0;
@@ -119,13 +108,31 @@ title: Import - The Distance
     }
   }
 
+  [data-status="completed"] {
+    ul {
+      border-bottom: var(--b);
+      border-radius: 0 0 var(--r) var(--r);
+      padding-bottom: 1.5rem;
+    }
+
+    .activity-header-row {
+      & > div:first-child {
+        display: none;
+      }
+
+      .activity-title {
+        padding-left: 0.5rem;
+      }
+    }
+  }
+
   .activity-row {
     border-bottom: var(--b);
     font-size: var(--font-size-0_75);
     line-height: 1;
     list-style: none;
 
-    &:last-child {
+    &:last-child:not(.completed-row) {
       border-bottom: 0;
     }
 
@@ -186,6 +193,8 @@ title: Import - The Distance
     /\/account\/imports\/([^/]+)/
   );
   const jobId = jobPathMatch ? jobPathMatch[1] : null;
+  const selected = new Set();
+  let authedUser = null;
 
   if (jobId) {
     document.addEventListener("afterAuthCheck", async (e) => {
@@ -193,6 +202,8 @@ title: Import - The Distance
         window.location.href = "/login";
         return;
       }
+
+      authedUser = e.detail.user;
 
       const header = document.querySelector(".contents header");
 
@@ -221,6 +232,8 @@ title: Import - The Distance
           )}</time></div>`
         );
 
+        document.getElementById("activities").dataset.status = job.status;
+
         if (job.status === "processing") {
           subscribeToEvents();
         } else if (job.status === "preview") {
@@ -229,6 +242,8 @@ title: Import - The Distance
             total: job.total,
             duplicates: job.duplicates,
           });
+        } else if (job.status === "completed") {
+          showCompleted(job);
         }
       } catch (err) {
         header.insertAdjacentHTML("beforeend", "<p>Error loading import</p>");
@@ -238,63 +253,164 @@ title: Import - The Distance
   }
 
   function showManifest(manifest) {
+    selected.clear();
+    manifest.activities.forEach((obj, idx) => {
+      if (!obj.duplicate) selected.add(idx);
+    });
+
     const container = document.getElementById("job-summary");
     container.innerHTML = `<p><b>${manifest.total}</b> total Activities found. Of those, <b>${manifest.duplicates}</b> look like duplicates and were deselected. We’ll only import selected Activities.</p>`;
 
     renderActivities(manifest.activities);
   }
 
-  function renderActivities(activities) {
-    const html = activities.reduce((str, obj) => {
-      const a = obj.activity;
-      const fmtDate = formatDate(a.started_at);
+  function activityColumns(obj) {
+    const a = obj.activity;
+    const fmtDate = formatDate(a.started_at);
+    const title =
+      obj.rkey && obj.did
+        ? `<a href="/activities/${obj.did}/${obj.rkey}">${a.title}</a>`
+        : a.title;
 
-      const nextStr = `
+    return `
+      <p class="activity-title"><b>${title}</b></p>
+      <time class="activity-time" datetime="${
+        a.started_at
+      }" title="${fmtDate}">${fmtDate}</time>
+      <p>${formatDuration(a.moving_time)}</p>
+      <p>${a.distance !== "0" ? `${metersToMiles(a.distance)} mi` : "-"}</p>
+      <p>${
+        a.elevation_gain ? `${metersToFeet(a.elevation_gain)} ft` : "-"
+      }</p>`;
+  }
+
+  function renderActivities(activities) {
+    const html = activities.reduce((str, obj, idx) => {
+      return (
+        str +
+        `
         <li id="activity-${obj.activity_id}" class="activity-row">
           <label>
             <div class="input-container">
-              <input type="checkbox" name="${obj.activity_id}" ${
-        !obj.duplicate ? "checked" : ""
-      } />
+              <input type="checkbox" data-index="${idx}" name="${
+          obj.activity_id
+        }" ${!obj.duplicate ? "checked" : ""} />
             </div>
             <div class="activity-contents">
-              <p class="activity-title"><b>${a.title}</b></p>
-              <time class="activity-time" datetime="${
-                a.started_at
-              }" title="${fmtDate}">${fmtDate}</time>
-              <p>${formatDuration(a.moving_time)}</p>
-
-              <p>${
-                a.distance !== "0" ? `${metersToMiles(a.distance)} mi` : "-"
-              }</p>
-              <p>${
-                a.elevation_gain ? `${metersToFeet(a.elevation_gain)} ft` : "-"
-              }</p>
+              ${activityColumns(obj)}
             </div>
           </label>
-        </li>
-      `;
-      return str + nextStr;
+        </li>`
+      );
     }, "");
 
     const container = document.getElementById("activities");
-    container.innerHTML = `
-      <div class="import-header">
-        <div class="activity-header-row">
-          <div>&nbsp;</div>
-          <div class="activity-title">Title</div>
-          <div class="activity-time">Date</div>
-          <div>Moving Time</div>
-          <div>Distance</div>
-          <div>Elev Gain</div>
-        </div>
-      </div>
-      <ul>${html}</ul>
+    container.querySelector(".import-header").insertAdjacentHTML(
+      "afterend",
+      `<ul>${html}</ul>
       <div class="import-footer">
         <div class="inner">
-          <button type="button" class="btn">Import 189 Activities</button>
+          <button type="button" class="btn import-btn">Import ${
+            selected.size
+          } ${pluralize(selected.size, "Activity", "Activities")}</button>
         </div>
-      </div>`;
+      </div>`
+    );
+
+    container.querySelector("ul").addEventListener("change", (e) => {
+      const checkbox = e.target;
+      if (checkbox.type !== "checkbox") return;
+      const idx = parseInt(checkbox.dataset.index, 10);
+      if (checkbox.checked) {
+        selected.add(idx);
+      } else {
+        selected.delete(idx);
+      }
+      container.querySelector(".import-btn").textContent = `Import ${
+        selected.size
+      } ${pluralize(selected.size, "Activity", "Activities")}`;
+    });
+
+    container
+      .querySelector(".import-btn")
+      .addEventListener("click", startImport);
+  }
+
+  async function startImport() {
+    const container = document.getElementById("activities");
+    container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.disabled = true;
+    });
+
+    const btn = document.querySelector(".import-btn");
+    btn.disabled = true;
+    btn.textContent = "Importing…";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/import/strava/run`, {
+        ...FETCH_OPTS,
+        method: "POST",
+        headers: { ...FETCH_OPTS.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: jobId,
+          selected: [...selected],
+          // FIXME: Turn this off when we're ready.
+          dry_run: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        btn.textContent = data.error || "Import failed";
+        btn.disabled = false;
+        return;
+      }
+
+      subscribeToEvents();
+    } catch (err) {
+      console.error(err);
+      btn.textContent = "Import failed";
+      btn.disabled = false;
+    }
+  }
+
+  function showCompleted(job) {
+    const summary = document.getElementById("job-summary");
+    const parts = [`<b>${job.imported}</b> imported`];
+    if (job.skipped > 0) parts.push(`<b>${job.skipped}</b> skipped`);
+    if (job.failed > 0) parts.push(`<b>${job.failed}</b> failed`);
+    const profileLink = authedUser
+      ? ` <a href="/profile/${authedUser.handle}">See them on your profile</a>.`
+      : "";
+    summary.innerHTML = `<p>${parts.join(", ")}.<br/>${profileLink}</p>`;
+
+    const footer = document.querySelector(".import-footer");
+    if (footer) footer.remove();
+
+    if (job.manifest) {
+      renderCompletedActivities(job.manifest.filter((obj) => obj.imported));
+    }
+  }
+
+  function renderCompletedActivities(activities) {
+    const html = activities.reduce((str, obj) => {
+      return (
+        str +
+        `
+        <li class="activity-row completed-row">
+          <div class="activity-contents">
+            ${activityColumns(obj)}
+          </div>
+        </li>`
+      );
+    }, "");
+
+    const container = document.getElementById("activities");
+    const oldList = container.querySelector("ul");
+    if (oldList) oldList.remove();
+    container
+      .querySelector(".import-header")
+      .insertAdjacentHTML("afterend", `<ul>${html}</ul>`);
   }
 
   function subscribeToEvents() {
@@ -305,6 +421,7 @@ title: Import - The Distance
 
     source.addEventListener("status", (e) => {
       const { status } = JSON.parse(e.data);
+      document.getElementById("activities").dataset.status = status;
       const el = document.querySelector(".job-status");
       if (el) {
         el.className = `job-status ${status}`;
@@ -312,8 +429,21 @@ title: Import - The Distance
       }
     });
 
+    source.addEventListener("progress", (e) => {
+      const { imported, skipped, failed, total } = JSON.parse(e.data);
+      const done = imported + skipped + failed;
+      const summary = document.getElementById("job-summary");
+      summary.innerHTML = `<p>Importing ${done} of ${total}…</p>`;
+    });
+
     source.addEventListener("manifest", (e) => {
       showManifest(JSON.parse(e.data));
+      source.close();
+    });
+
+    source.addEventListener("completed", (e) => {
+      const data = JSON.parse(e.data);
+      showCompleted(data);
       source.close();
     });
 
