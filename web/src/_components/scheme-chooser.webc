@@ -2,12 +2,12 @@
   <svg
     class="icon-light"
     xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
+    width="28"
+    height="28"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.5"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-label="Light scheme"
@@ -26,12 +26,12 @@
   <svg
     class="icon-dark"
     xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
+    width="28"
+    height="28"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.5"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-label="Dark scheme"
@@ -85,11 +85,11 @@
     background: none;
     cursor: pointer;
     border: 1px dotted transparent;
-    border-radius: 1rem;
+    border-radius: 9999px;
     display: grid;
     color: var(--color-foreground);
     font-size: var(--font-size-0_75);
-    padding: 0.35rem;
+    padding: 0.2rem;
     text-decoration: none;
 
     &:hover,
@@ -105,11 +105,12 @@
     }
 
     svg {
+      --size: 20px;
       display: block;
       grid-area: 1 / 1;
-      height: auto;
+      height: var(--size);
       transition: transform 0.1s ease;
-      width: 1rem;
+      width: var(--size);
     }
 
     .hidden {

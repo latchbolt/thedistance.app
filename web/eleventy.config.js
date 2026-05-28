@@ -15,6 +15,8 @@ export default function (eleventyConfig) {
     "node_modules/maplibre-gl/dist/maplibre-gl.css": "vendor/maplibre-gl.css",
   });
 
+  eleventyConfig.addWatchTarget("src/_components/");
+
   eleventyConfig.setServerOptions({
     domDiff: false,
     hostname: "127.0.0.1",
