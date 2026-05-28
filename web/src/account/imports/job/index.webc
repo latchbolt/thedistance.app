@@ -235,6 +235,11 @@ title: Import - The Distance
         document.getElementById("activities").dataset.status = job.status;
 
         if (job.status === "processing") {
+          const summary = document.getElementById("job-summary");
+          summary.innerHTML = `<p>Processing ${capitalize(
+            job.source
+          )} import. This shouldn’t take more than 30 seconds, but if you have large archive, could take up a minute.</p>`;
+
           subscribeToEvents();
         } else if (job.status === "preview") {
           showManifest({

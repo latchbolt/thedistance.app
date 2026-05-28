@@ -26,6 +26,9 @@ title: Import from Strava - The Distance
             >Exporting your Data and Bulk Export</a
           >”. Look for the “Bulk Export” section near the bottom.
         </p>
+      </div>
+      <div class="import-workspace">
+        <import-wizard></import-wizard>
 
         <details>
           <summary><strong>Strava export steps</strong></summary>
@@ -53,9 +56,6 @@ title: Import from Strava - The Distance
             <li>Once you have the zip file, upload it here</li>
           </ol>
         </details>
-      </div>
-      <div class="import-workspace">
-        <import-wizard></import-wizard>
       </div>
     </div>
   </div>
@@ -88,7 +88,10 @@ title: Import from Strava - The Distance
   }
 
   .import-workspace {
+    display: flex;
+    flex-direction: column;
     flex: 1;
+    row-gap: 1rem;
   }
 
   @media (min-width: 760px) {
