@@ -168,6 +168,10 @@
   }
 
   .nav-btn {
+    --active-border-color: light-dark(
+      hsl(var(--color-foreground-hsl-light) / 25%),
+      hsl(var(--color-foreground-hsl-dark) / 25%)
+    );
     border: 1px dotted transparent;
     border-radius: 9999px;
     color: var(--color-foreground);
@@ -178,10 +182,7 @@
 
     &:hover,
     &:focus-visible {
-      border-color: light-dark(
-        hsl(var(--color-foreground-hsl-light) / 25%),
-        hsl(var(--color-foreground-hsl-dark) / 25%)
-      );
+      border-color: var(--active-border-color);
     }
   }
 
@@ -191,6 +192,14 @@
     border-radius: 8px;
     column-gap: 0.125rem;
     display: flex;
+  }
+
+  .user-btn:has(+ .page-header-user-menu:popover-open) {
+    border-color: var(--active-border-color);
+
+    svg {
+      rotate: 180deg;
+    }
   }
 
   .user-btn-avatar {
