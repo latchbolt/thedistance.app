@@ -47,12 +47,25 @@
 
   function getAuthedUI(user) {
     return `
-      <a href="/add-activities" class="nav-btn header-btn">
+      <button type="button" class="nav-btn new-btn header-btn" popovertarget="page-header-new-menu">
         <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24">
           <path d="M12 5l0 14" />
 	        <path d="M5 12l14 0" />
         </svg>
-      </a>
+      </button>
+
+      <div popover id="page-header-new-menu" class="page-header-menu page-header-new-menu">
+        <div class="menu-items">
+          <a href="/import">
+            Import
+            <span class="item-desc">Migrate your data from other services.</span>
+          </a>
+          <a href="/add-activities">
+            Upload
+            <span class="item-desc">Create activities from common file formats.</span>
+          </a>
+        </div>
+      </div>
 
       <button type="button" class="nav-btn user-btn" popovertarget="page-header-user-menu">
         <div class="user-btn-avatar">
@@ -63,12 +76,12 @@
         </svg>
       </button>
       
-      <div popover id="page-header-user-menu" class="page-header-user-menu">
+      <div popover id="page-header-user-menu" class="page-header-menu page-header-user-menu">
         <header>
           <span class="dname">${user.displayName}</span>
           <span class="handle"><b class="at">@</b>${user.handle}</span>
         </header>
-        <div class="user-menu-items">
+        <div class="menu-items">
           <a href="/profile/${user.handle}">Profile</a>
           <a href="/account/settings">Settings</a>
           <button id="logout-btn" type="button">Log out</button>
@@ -184,6 +197,10 @@
     &:focus-visible {
       border-color: var(--active-border-color);
     }
+
+    svg {
+      transition: 0.15s ease;
+    }
   }
 
   .user-btn {
@@ -221,14 +238,13 @@
     }
   }
 
-  .page-header-user-menu {
+  .page-header-menu {
     background-color: var(--color-background);
     border: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
     border-radius: 8px;
     opacity: 1;
     flex-direction: column;
     min-width: 180px;
-    position-anchor: --user-menu-anchor;
     position-area: bottom span-left;
     top: 0.25rem;
     transform: translateY(0);
@@ -242,6 +258,10 @@
         transform: translateY(-1rem);
       }
     }
+  }
+
+  .page-header-user-menu {
+    position-anchor: --user-menu-anchor;
 
     header {
       border-bottom: 1px dotted
@@ -259,33 +279,42 @@
 
       .handle {
         font-size: var(--font-size-0_5);
+        opacity: 0.75;
+      }
+    }
+  }
+
+  .menu-items {
+    display: flex;
+    flex-direction: column;
+    font-size: var(--font-size-0_75);
+    line-height: 1.1;
+
+    button {
+      appearance: none;
+      background: none;
+      border: 0;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    a,
+    button {
+      color: var(--color-foreground);
+      padding: 0.5rem 0.75rem;
+      text-decoration: none;
+
+      &:hover,
+      &:focus-visible {
+        background: color-mix(in srgb, currentColor 5%, transparent);
       }
     }
 
-    .user-menu-items {
-      display: flex;
-      flex-direction: column;
-      font-size: var(--font-size-0_75);
-
-      button {
-        appearance: none;
-        background: none;
-        border: 0;
-        cursor: pointer;
-        text-align: left;
-      }
-
-      a,
-      button {
-        color: var(--color-foreground);
-        padding: 0.25rem 0.75rem;
-        text-decoration: none;
-
-        &:hover,
-        &:focus-visible {
-          background: color-mix(in srgb, currentColor 5%, transparent);
-        }
-      }
+    .item-desc {
+      display: block;
+      font-size: var(--font-size-0_5);
+      max-width: 180px;
+      opacity: 0.75;
     }
   }
 
@@ -297,6 +326,14 @@
       --size: 24px;
       height: var(--size);
       width: var(--size);
+    }
+  }
+
+  .new-btn:has(+ .page-header-new-menu:popover-open) {
+    border-color: var(--active-border-color);
+
+    svg {
+      rotate: 45deg;
     }
   }
 

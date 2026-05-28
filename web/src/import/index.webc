@@ -4,12 +4,25 @@ title: Import - The Distance
 ---
 
 <div class="g-max-centered">
-  <header>
-    <h2>Import</h2>
-    <p>Migrate your data from other services.</p>
-  </header>
+  <div class="contents">
+    <header>
+      <h2>Import</h2>
+      <p>Migrate your data from other services.</p>
+    </header>
 
-  <div>
-    <a href="/import/strava">Strava</a>
+    <div>
+      <a href="/import/strava">Strava</a>
+    </div>
+    <div></div>
   </div>
 </div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+</style>
