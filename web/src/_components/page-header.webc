@@ -60,7 +60,7 @@
             Import
             <span class="item-desc">Migrate your data from other services.</span>
           </a>
-          <a href="/add-activities">
+          <a href="/upload">
             Upload
             <span class="item-desc">Create activities from common file formats.</span>
           </a>
