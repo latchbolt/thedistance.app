@@ -6,11 +6,13 @@ title: Imports - The Distance
 <div class="g-max-centered">
   <div class="contents">
     <header>
-      <a href="/account/">Back</a>
-      <h2>Imports</h2>
-      <a href="/import">New</a>
+      <h2>Imports <a href="/import">New</a></h2>
+      <account-nav></account-nav>
     </header>
-    <div id="import-jobs"></div>
+
+    <div>
+      <div id="import-jobs"></div>
+    </div>
   </div>
 </div>
 

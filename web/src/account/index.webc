@@ -7,11 +7,10 @@ title: Account - The Distance
   <div class="contents">
     <header>
       <h2>Account</h2>
+      <account-nav></account-nav>
     </header>
-    <ul>
-      <li><a href="/account/settings">Settings</a></li>
-      <li><a href="/account/imports">Imports</a></li>
-    </ul>
+
+    <div>Account content</div>
   </div>
 </div>
 

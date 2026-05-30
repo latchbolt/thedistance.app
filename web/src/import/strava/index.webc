@@ -6,6 +6,7 @@ title: Import from Strava - The Distance
 <div class="g-max-centered">
   <div class="contents">
     <header>
+      <header-back-btn href="/import/" text="Back"></header-back-btn>
       <h2>Import from Strava</h2>
       <p>Bulk export and import your Strava data.</p>
     </header>

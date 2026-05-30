@@ -1,0 +1,31 @@
+<nav webc:root="override">
+  <ul>
+    <li>
+      <a href="/account/">Account</a>
+    </li>
+    <li>
+      <a href="/account/settings/">Settings</a>
+    </li>
+    <li>
+      <a href="/account/imports/">Imports</a>
+    </li>
+  </ul>
+</nav>
+
+<style webc:scoped="account-nav">
+  ul {
+    display: flex;
+    gap: 0.5rem;
+    list-style: none;
+    padding: 0;
+  }
+</style>
+
+<style>
+  [data-page="/account/"] .account-nav a[href="/account/"],
+  [data-page="/account/settings/"] .account-nav a[href="/account/settings/"],
+  [data-page="/account/imports/"] .account-nav a[href="/account/imports/"] {
+    color: var(--color-foreground);
+    text-decoration: none;
+  }
+</style>

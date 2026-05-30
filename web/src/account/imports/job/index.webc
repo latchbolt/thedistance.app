@@ -6,7 +6,10 @@ title: Import - The Distance
 <div class="g-max-centered">
   <div class="contents">
     <header>
-      <a href="/account/imports/">Back</a>
+      <header-back-btn
+        href="/account/imports/"
+        text="Imports"
+      ></header-back-btn>
       <h2>Import</h2>
     </header>
     <div id="job-summary"></div>
