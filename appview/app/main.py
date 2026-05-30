@@ -96,6 +96,78 @@ if CLIENT_PUB_JWK:
     assert "d" not in CLIENT_PUB_JWK, "Public JWK must not contain private key material"
 
 
+def pds_request(method: str, url: str, session: dict, body: dict | None = None):
+    """Make an authenticated PDS request, refreshing tokens if expired.
+
+    Returns (response, did) on success. Persists updated nonces and tokens.
+    Raises on network errors.
+    """
+    did = session["did"]
+
+    with httpx.Client() as client:
+        resp, dpop_pds_nonce = pds_authed_request(
+            client=client,
+            method=method,
+            url=url,
+            session=session,
+            body=body,
+        )
+
+    conn = get_connection()
+    try:
+        update_oauth_session_pds_nonce(conn, did, dpop_pds_nonce)
+    finally:
+        conn.close()
+
+    if resp.status_code == 401:
+        try:
+            resp_body = resp.json()
+        except Exception:
+            resp_body = {}
+
+        if resp_body.get("error") == "invalid_token":
+            log.info("Access token expired for %s, refreshing", did)
+            client_id, _ = compute_client_id(settings.app_url)
+
+            with httpx.Client() as client:
+                tokens, dpop_authserver_nonce = refresh_token_request(
+                    client=client,
+                    session=session,
+                    client_id=client_id,
+                    client_secret_jwk=CLIENT_SECRET_JWK,
+                )
+
+            conn = get_connection()
+            try:
+                update_oauth_session_tokens(
+                    conn,
+                    did,
+                    tokens["access_token"],
+                    tokens["refresh_token"],
+                    dpop_authserver_nonce,
+                )
+                session = get_oauth_session(conn, did)
+            finally:
+                conn.close()
+
+            with httpx.Client() as client:
+                resp, dpop_pds_nonce = pds_authed_request(
+                    client=client,
+                    method=method,
+                    url=url,
+                    session=session,
+                    body=body,
+                )
+
+            conn = get_connection()
+            try:
+                update_oauth_session_pds_nonce(conn, did, dpop_pds_nonce)
+            finally:
+                conn.close()
+
+    return resp, did
+
+
 def compute_client_id(app_url: str) -> tuple[str, str]:
     """Compute the OAuth client_id and redirect_uri from the app URL."""
     parsed = urlparse(app_url)
@@ -501,15 +573,7 @@ def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool)
             }
 
             try:
-                with httpx.Client() as client:
-                    resp, dpop_pds_nonce = pds_authed_request(
-                        client=client,
-                        method="POST",
-                        url=url,
-                        session=session,
-                        body=body,
-                    )
-                update_oauth_session_pds_nonce(conn, did, dpop_pds_nonce)
+                resp, _ = pds_request("POST", url, session, body)
 
                 if resp.status_code in [200, 201]:
                     upsert_activity(conn, did, rkey, record)
@@ -583,14 +647,7 @@ def create_activity_endpoint(
     }
 
     try:
-        with httpx.Client() as client:
-            resp, dpop_pds_nonce = pds_authed_request(
-                client=client,
-                method="POST",
-                url=url,
-                session=session,
-                body=body,
-            )
+        resp, did = pds_request("POST", url, session, body)
     except httpx.TimeoutException:
         log.error("PDS request timed out for %s", session["did"])
         return JSONResponse(status_code=504, content={"error": "PDS request timed out"})
@@ -598,21 +655,19 @@ def create_activity_endpoint(
         log.error("PDS request failed for %s: %s", session["did"], e)
         return JSONResponse(status_code=502, content={"error": "Failed to reach PDS"})
 
-    conn = get_connection()
-    try:
-        update_oauth_session_pds_nonce(conn, session["did"], dpop_pds_nonce)
-        if resp.status_code in [200, 201]:
-            upsert_activity(conn, session["did"], rkey, record)
-    finally:
-        conn.close()
-
-    if resp.status_code not in [200, 201]:
+    if resp.status_code in [200, 201]:
+        conn = get_connection()
+        try:
+            upsert_activity(conn, did, rkey, record)
+        finally:
+            conn.close()
+    else:
         log.error("PDS create error: %s", resp.text)
         return JSONResponse(
             status_code=resp.status_code, content={"error": "PDS create failed"}
         )
 
-    return {"status": "created", "rkey": rkey, "did": session["did"]}
+    return {"status": "created", "rkey": rkey, "did": did}
 
 
 @app.delete("/api/activities/{did}/{rkey}")
@@ -635,14 +690,7 @@ def delete_activity_endpoint(
     }
 
     try:
-        with httpx.Client() as client:
-            resp, dpop_pds_nonce = pds_authed_request(
-                client=client,
-                method="POST",
-                url=url,
-                session=session,
-                body=body,
-            )
+        resp, _ = pds_request("POST", url, session, body)
     except httpx.TimeoutException:
         log.error("PDS request timed out for %s", session["did"])
         return JSONResponse(status_code=504, content={"error": "PDS request timed out"})
@@ -650,15 +698,13 @@ def delete_activity_endpoint(
         log.error("PDS request failed for %s: %s", session["did"], e)
         return JSONResponse(status_code=502, content={"error": "Failed to reach PDS"})
 
-    conn = get_connection()
-    try:
-        update_oauth_session_pds_nonce(conn, session["did"], dpop_pds_nonce)
-        if resp.status_code in [200, 201]:
+    if resp.status_code in [200, 201]:
+        conn = get_connection()
+        try:
             delete_activity(conn, did, rkey)
-    finally:
-        conn.close()
-
-    if resp.status_code not in [200, 201]:
+        finally:
+            conn.close()
+    else:
         log.error("PDS delete error: %s", resp.text)
         return JSONResponse(
             status_code=resp.status_code, content={"error": "PDS delete failed"}
