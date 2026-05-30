@@ -195,6 +195,12 @@ def set_cursor(conn, cursor_value):
     conn.commit()
 
 
+# DIDs hidden from the global feed. Their profile pages still work.
+HIDDEN_DIDS = [
+    "did:plc:te2b5jsybsv5n52yah7ske2e",  # tylergaw-tester1.bsky.social
+]
+
+
 def list_activities(conn, limit=50, offset=0, sport_type=None, did=None):
     query = """
         SELECT a.*,
@@ -210,6 +216,10 @@ def list_activities(conn, limit=50, offset=0, sport_type=None, did=None):
     if did:
         conditions.append("a.did = %s")
         params.append(did)
+    elif HIDDEN_DIDS:
+        placeholders = ", ".join(["%s"] * len(HIDDEN_DIDS))
+        conditions.append(f"a.did NOT IN ({placeholders})")
+        params.extend(HIDDEN_DIDS)
     if sport_type:
         conditions.append("a.sport_type = %s")
         params.append(sport_type)
