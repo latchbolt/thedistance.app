@@ -25,6 +25,7 @@ STRAVA_CSV_COLUMNS = {
     "max_speed": 18,
     "avg_speed": 19,
     "elevation_gain": 20,
+    "elevation_loss": 21,
     "max_cadence": 28,
     "avg_cadence": 29,
     "max_heart_rate": 30,
@@ -32,7 +33,29 @@ STRAVA_CSV_COLUMNS = {
     "max_watts": 32,
     "avg_watts": 33,
     "calories": 34,
+    "max_temperature": 35,
+    "avg_temperature": 36,
+    "total_work": 38,
+    "perceived_exertion": 43,
     "start_time": 45,
+    "weighted_avg_power": 46,
+    "weather_condition": 55,
+    "weather_temperature": 56,
+    "weather_apparent_temperature": 57,
+    "weather_dewpoint": 58,
+    "weather_humidity": 59,
+    "weather_pressure": 60,
+    "weather_wind_speed": 61,
+    "weather_wind_gust": 62,
+    "weather_wind_bearing": 63,
+    "weather_precipitation_intensity": 64,
+    "weather_sunrise_time": 65,
+    "weather_sunset_time": 66,
+    "weather_precipitation_probability": 70,
+    "weather_precipitation_type": 71,
+    "weather_cloud_cover": 72,
+    "weather_visibility": 73,
+    "weather_uv_index": 74,
     "media": 102,
 }
 
@@ -61,6 +84,63 @@ def parse_strava_csv(csv_data: str) -> list[dict]:
         rows.append(row)
 
     return rows
+
+
+def _build_weather(row: dict) -> dict | None:
+    """Build a weather dict from Strava CSV weather columns.
+
+    Returns None if no weather data is present.
+    """
+    mapping = {
+        "condition": "weather_condition",
+        "temperature": "weather_temperature",
+        "apparent_temperature": "weather_apparent_temperature",
+        "avg_temperature": "avg_temperature",
+        "max_temperature": "max_temperature",
+        "dewpoint": "weather_dewpoint",
+        "humidity": "weather_humidity",
+        "pressure": "weather_pressure",
+        "wind_speed": "weather_wind_speed",
+        "wind_gust": "weather_wind_gust",
+        "wind_bearing": "weather_wind_bearing",
+        "precipitation_intensity": "weather_precipitation_intensity",
+        "precipitation_probability": "weather_precipitation_probability",
+        "precipitation_type": "weather_precipitation_type",
+        "cloud_cover": "weather_cloud_cover",
+        "visibility": "weather_visibility",
+        "uv_index": "weather_uv_index",
+    }
+
+    weather = {}
+    for key, csv_field in mapping.items():
+        val = row.get(csv_field, "").strip()
+        if val:
+            weather[key] = val
+
+    return weather if weather else None
+
+
+def _apply_extra_stats(activity: dict, row: dict) -> None:
+    """Add extra stats and weather from a Strava CSV row to an activity dict."""
+    elevation_loss = safe_float(row.get("elevation_loss"))
+    if elevation_loss is not None:
+        activity["elevation_loss"] = str(round(elevation_loss, 1))
+
+    total_work = safe_float(row.get("total_work"))
+    if total_work is not None:
+        activity["total_work"] = int(total_work)
+
+    weighted_avg_power = safe_float(row.get("weighted_avg_power"))
+    if weighted_avg_power is not None:
+        activity["weighted_avg_power"] = int(weighted_avg_power)
+
+    perceived_exertion = safe_float(row.get("perceived_exertion"))
+    if perceived_exertion is not None:
+        activity["perceived_exertion"] = int(perceived_exertion)
+
+    weather = _build_weather(row)
+    if weather:
+        activity["weather"] = weather
 
 
 def build_activity_from_strava_csv(row: dict) -> dict:
@@ -106,6 +186,8 @@ def build_activity_from_strava_csv(row: dict) -> dict:
     if description:
         activity["description"] = description
 
+    _apply_extra_stats(activity, row)
+
     return activity
 
 
@@ -149,6 +231,8 @@ def merge_csv_metadata(file_activity: dict, csv_row: dict) -> dict:
                 merged[key] = int(csv_val)
             else:
                 merged[key] = str(round(csv_val, 3))
+
+    _apply_extra_stats(merged, csv_row)
 
     return merged
 

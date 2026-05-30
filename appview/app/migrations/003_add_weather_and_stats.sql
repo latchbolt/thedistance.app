@@ -1,0 +1,5 @@
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS elevation_loss TEXT;
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS total_work INTEGER;
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS weighted_avg_power INTEGER;
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS perceived_exertion INTEGER;
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS weather JSONB;

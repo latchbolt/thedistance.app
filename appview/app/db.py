@@ -1,7 +1,14 @@
+import logging
+from pathlib import Path
+
 import psycopg
 from psycopg.rows import dict_row
 
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
+
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
 def get_connection():
@@ -12,124 +19,36 @@ def init_db():
     with get_connection() as conn:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS activities (
-                did TEXT NOT NULL,
-                rkey TEXT NOT NULL,
-                sport_type TEXT NOT NULL,
-                title TEXT,
-                description TEXT,
-                started_at TIMESTAMPTZ NOT NULL,
-                elapsed_time INTEGER NOT NULL,
-                moving_time INTEGER NOT NULL,
-                distance TEXT NOT NULL,
-                elevation_gain TEXT,
-                avg_speed TEXT,
-                max_speed TEXT,
-                avg_heart_rate INTEGER,
-                max_heart_rate INTEGER,
-                avg_cadence INTEGER,
-                max_cadence INTEGER,
-                avg_power INTEGER,
-                max_power INTEGER,
-                calories INTEGER,
-                polyline TEXT,
-                device TEXT,
-                source TEXT,
-                created_at TIMESTAMPTZ NOT NULL,
-                indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (did, rkey)
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                filename TEXT PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """
         )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_activities_started_at
-                ON activities (started_at DESC)
-        """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_activities_did
-                ON activities (did)
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cursor (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                cursor_value BIGINT NOT NULL
+        conn.commit()
+
+        applied = {
+            row["filename"]
+            for row in conn.execute(
+                "SELECT filename FROM schema_migrations"
+            ).fetchall()
+        }
+
+        migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+
+        for migration_file in migration_files:
+            if migration_file.name in applied:
+                continue
+
+            log.info("Applying migration: %s", migration_file.name)
+            sql = migration_file.read_text()
+            conn.execute(sql)
+            conn.execute(
+                "INSERT INTO schema_migrations (filename) VALUES (%s)",
+                (migration_file.name,),
             )
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS oauth_auth_requests (
-                state TEXT PRIMARY KEY,
-                authserver_iss TEXT NOT NULL,
-                did TEXT,
-                handle TEXT,
-                pds_url TEXT,
-                pkce_verifier TEXT NOT NULL,
-                scope TEXT NOT NULL,
-                dpop_authserver_nonce TEXT NOT NULL,
-                dpop_private_jwk TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS profiles (
-                did TEXT PRIMARY KEY,
-                handle TEXT NOT NULL,
-                display_name TEXT,
-                description TEXT,
-                avatar_url TEXT,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS oauth_sessions (
-                did TEXT PRIMARY KEY,
-                handle TEXT NOT NULL,
-                pds_url TEXT NOT NULL,
-                authserver_iss TEXT NOT NULL,
-                access_token TEXT NOT NULL,
-                refresh_token TEXT NOT NULL,
-                dpop_authserver_nonce TEXT NOT NULL,
-                dpop_pds_nonce TEXT,
-                dpop_private_jwk TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS import_jobs (
-                id TEXT PRIMARY KEY,
-                did TEXT NOT NULL,
-                source TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'preview',
-                total INTEGER NOT NULL DEFAULT 0,
-                duplicates INTEGER NOT NULL DEFAULT 0,
-                imported INTEGER NOT NULL DEFAULT 0,
-                skipped INTEGER NOT NULL DEFAULT 0,
-                failed INTEGER NOT NULL DEFAULT 0,
-                errors JSONB NOT NULL DEFAULT '[]',
-                manifest JSONB,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                completed_at TIMESTAMPTZ
-            )
-        """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_import_jobs_did
-                ON import_jobs (did)
-        """
-        )
+            conn.commit()
+            log.info("Applied migration: %s", migration_file.name)
 
 
 def upsert_activity(conn, did, rkey, record):
@@ -138,13 +57,16 @@ def upsert_activity(conn, did, rkey, record):
         INSERT INTO activities (
             did, rkey, sport_type, title, description, started_at,
             elapsed_time, moving_time, distance, elevation_gain,
-            avg_speed, max_speed, avg_heart_rate, max_heart_rate,
+            elevation_loss, avg_speed, max_speed,
+            avg_heart_rate, max_heart_rate,
             avg_cadence, max_cadence, avg_power, max_power,
-            calories, polyline, device, source, created_at
+            calories, total_work, weighted_avg_power,
+            perceived_exertion,
+            polyline, device, source, source_id, weather, created_at
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (did, rkey) DO UPDATE SET
             sport_type = EXCLUDED.sport_type,
@@ -155,6 +77,7 @@ def upsert_activity(conn, did, rkey, record):
             moving_time = EXCLUDED.moving_time,
             distance = EXCLUDED.distance,
             elevation_gain = EXCLUDED.elevation_gain,
+            elevation_loss = EXCLUDED.elevation_loss,
             avg_speed = EXCLUDED.avg_speed,
             max_speed = EXCLUDED.max_speed,
             avg_heart_rate = EXCLUDED.avg_heart_rate,
@@ -164,9 +87,14 @@ def upsert_activity(conn, did, rkey, record):
             avg_power = EXCLUDED.avg_power,
             max_power = EXCLUDED.max_power,
             calories = EXCLUDED.calories,
+            total_work = EXCLUDED.total_work,
+            weighted_avg_power = EXCLUDED.weighted_avg_power,
+            perceived_exertion = EXCLUDED.perceived_exertion,
             polyline = EXCLUDED.polyline,
             device = EXCLUDED.device,
             source = EXCLUDED.source,
+            source_id = EXCLUDED.source_id,
+            weather = EXCLUDED.weather,
             created_at = EXCLUDED.created_at,
             indexed_at = NOW()
     """,
@@ -181,6 +109,7 @@ def upsert_activity(conn, did, rkey, record):
             record["movingTime"],
             record["distance"],
             record.get("elevationGain"),
+            record.get("elevationLoss"),
             record.get("avgSpeed"),
             record.get("maxSpeed"),
             record.get("avgHeartRate"),
@@ -190,9 +119,14 @@ def upsert_activity(conn, did, rkey, record):
             record.get("avgPower"),
             record.get("maxPower"),
             record.get("calories"),
+            record.get("totalWork"),
+            record.get("weightedAvgPower"),
+            record.get("perceivedExertion"),
             record.get("polyline"),
             record.get("device"),
             record.get("source"),
+            record.get("sourceId"),
+            psycopg.types.json.Json(record["weather"]) if record.get("weather") else None,
             record["createdAt"],
         ),
     )

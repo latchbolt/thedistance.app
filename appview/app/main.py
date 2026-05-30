@@ -544,6 +544,12 @@ def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool)
 
             activity = item["activity"]
             record = {to_camel_case(k): v for k, v in activity.items()}
+            if record.get("weather"):
+                record["weather"] = {
+                    to_camel_case(k): v for k, v in record["weather"].items()
+                }
+            if item.get("activity_id"):
+                record["sourceId"] = item["activity_id"]
 
             if dry_run:
                 # FIXME: Remove this delay when done testing. Simulates PDS round-trip.
