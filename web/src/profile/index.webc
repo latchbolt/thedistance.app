@@ -79,7 +79,7 @@ title: Profile - The Distance
   async function renderProfile({ user }) {
     const { data } = await getActivities(user.did);
     const dname = document.querySelector(".profile-dname");
-    dname.textContent = user.displayName;
+    dname.textContent = user.displayName || user.handle;
 
     const desc = document.querySelector(".profile-desc");
     if (user.description) {

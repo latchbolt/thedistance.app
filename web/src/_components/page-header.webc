@@ -78,7 +78,7 @@
       
       <div popover id="page-header-user-menu" class="page-header-menu page-header-user-menu">
         <header>
-          <span class="dname">${user.displayName}</span>
+          <span class="dname">${user.displayName || user.handle}</span>
           <span class="handle"><b class="at">@</b>${user.handle}</span>
         </header>
         <div class="menu-items">
