@@ -267,7 +267,19 @@ title: Import - The Distance
     });
 
     const container = document.getElementById("job-summary");
-    container.innerHTML = `<p><b>${manifest.total}</b> total Activities found. Of those, <b>${manifest.duplicates}</b> look like duplicates and were deselected. We’ll only import selected Activities.</p>`;
+    let dupesMsg = "";
+
+    if (manifest.duplicates !== 0) {
+      dupesMsg = ` Of those, ${manifest.duplicates}`;
+
+      if (manifest.duplicates > 1) {
+        dupesMsg += " look like duplicates and were deselected. ";
+      } else {
+        dupesMsg += " looks like a duplicate and was deselected. ";
+      }
+    }
+
+    container.innerHTML = `<p><b>${manifest.total}</b> total Activities found.${dupesMsg}We’ll only import selected Activities.</p>`;
 
     renderActivities(manifest.activities);
   }
