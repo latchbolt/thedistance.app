@@ -6,8 +6,8 @@ title: Account - The Distance
 <div class="g-max-centered">
   <div class="contents">
     <header>
-      <h2>Account</h2>
       <account-nav></account-nav>
+      <h2>Account</h2>
     </header>
 
     <div>Account content</div>

@@ -6,8 +6,8 @@ title: Settings - The Distance
 <div class="g-max-centered">
   <div class="contents">
     <header>
-      <h2>Settings</h2>
       <account-nav></account-nav>
+      <h2>Settings</h2>
     </header>
 
     <div>Settings content</div>

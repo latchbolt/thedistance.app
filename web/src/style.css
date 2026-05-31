@@ -268,7 +268,7 @@ sup {
 
 .btn-secondary {
   appearance: none;
-  background: none;
+  background: var(--color-background);
   border: 1px dotted
     color-mix(in srgb, currentColor var(--b-opacity, 30%), transparent);
   border-radius: 999px;
@@ -276,6 +276,7 @@ sup {
   cursor: pointer;
   font-weight: 500;
   padding: 0.2em 0.7em 0.25em 0.7em;
+  text-decoration: none;
 
   &:hover,
   &:focus-visible {
@@ -285,8 +286,9 @@ sup {
 
   &:has(svg) {
     align-items: center;
-    display: flex;
+    display: inline-flex;
     column-gap: 0.25rem;
+    padding-left: 0.5em;
 
     svg {
       --size: 1.2em;
