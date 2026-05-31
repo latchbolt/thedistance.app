@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import time
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -522,7 +521,7 @@ def strava_run(
     return {"job_id": job_id}
 
 
-def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool):
+def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool = False):
     conn = get_connection()
     try:
         job = get_import_job_for_user(conn, job_id, did)
@@ -552,8 +551,6 @@ def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool)
                 record["sourceId"] = item["activity_id"]
 
             if dry_run:
-                # FIXME: Remove this delay when done testing. Simulates PDS round-trip.
-                time.sleep(0.1)
                 manifest[idx]["imported"] = True
                 imported += 1
                 update_import_job_progress(conn, job_id, imported, skipped, failed)
