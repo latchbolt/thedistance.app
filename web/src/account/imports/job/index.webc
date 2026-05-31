@@ -288,8 +288,8 @@ title: Import - The Distance
     const a = obj.activity;
     const fmtDate = formatDate(a.started_at);
     const title =
-      obj.rkey && obj.did
-        ? `<a href="/activities/${obj.did}/${obj.rkey}">${a.title}</a>`
+      obj.rkey && authedUser
+        ? `<a href="/profile/${authedUser.handle}/activity/${obj.rkey}">${a.title}</a>`
         : a.title;
 
     return `
@@ -374,8 +374,6 @@ title: Import - The Distance
         body: JSON.stringify({
           job_id: jobId,
           selected: [...selected],
-          // FIXME: Turn this off when we're ready.
-          dry_run: true,
         }),
       });
 
@@ -396,7 +394,7 @@ title: Import - The Distance
 
   function showCompleted(job) {
     const summary = document.getElementById("job-summary");
-    const parts = [`<b>${job.imported}</b> imported`];
+    const parts = [`<b>${job.imported}</b> Activities imported`];
     if (job.skipped > 0) parts.push(`<b>${job.skipped}</b> skipped`);
     if (job.failed > 0) parts.push(`<b>${job.failed}</b> failed`);
     const profileLink = authedUser

@@ -13,7 +13,11 @@ title: Profile - The Distance
         <div class="profile-desc">&nbsp;</div>
       </div>
     </header>
-    <activity-list id="profile-activities" loading></activity-list>
+
+    <div class="profile-main-content">
+      <h2>Activities</h2>
+      <activity-list id="profile-activities" loading profile></activity-list>
+    </div>
   </div>
 </div>
 
@@ -21,7 +25,7 @@ title: Profile - The Distance
   .contents {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
+    gap: 3rem;
     margin: 0 auto;
     max-width: var(--grid-max-5);
     padding-bottom: 2rem;
@@ -30,10 +34,15 @@ title: Profile - The Distance
 
   .profile-header {
     display: flex;
+    flex: 1;
     flex-wrap: wrap;
     gap: 1rem;
     letter-spacing: -1%;
     line-height: 1.25;
+  }
+
+  .profile-main-content {
+    flex: 1;
   }
 
   .profile-contents {

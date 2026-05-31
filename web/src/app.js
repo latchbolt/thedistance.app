@@ -75,7 +75,9 @@ async function getUserByHandle(handle) {
  * @returns {Promise<{data: Array|null, error: string|null}>}
  */
 async function getActivities(did, { limit } = {}) {
-  const path = did ? `/api/activities/${encodeURIComponent(did)}` : "/api/activities";
+  const path = did
+    ? `/api/activities/${encodeURIComponent(did)}`
+    : "/api/activities";
   const params = new URLSearchParams();
   if (limit) params.set("limit", limit);
   const qs = params.toString();
@@ -131,7 +133,6 @@ async function getActivity(did, rkey) {
   }
 }
 
-
 function metersToMiles(m) {
   return (parseFloat(m) / 1609.344).toFixed(1);
 }
@@ -143,7 +144,6 @@ function msToMph(ms) {
 function metersToFeet(m) {
   return Math.round(parseFloat(m) * 3.28084);
 }
-
 
 function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600);
@@ -194,6 +194,47 @@ function decodePolyline(encoded) {
   }
 
   return coords;
+}
+
+/**
+ * Convert an encoded polyline to an SVG path string.
+ * @param {string} encoded - Google encoded polyline
+ * @param {number} [padding=10] - Padding around the path in SVG units
+ * @returns {string} SVG markup string, or empty string if no valid coords
+ */
+function polylineToSVG(encoded) {
+  const coords = decodePolyline(encoded);
+  if (coords.length < 2) return "";
+
+  // cos(lat) correction for longitude
+  const midLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+  const cosLat = Math.cos((midLat * Math.PI) / 180);
+
+  // Project and flip Y (SVG Y is top-down, lat is bottom-up)
+  const projected = coords.map(([lng, lat]) => [lng * cosLat, -lat]);
+
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const [x, y] of projected) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+
+  const rangeX = maxX - minX || 0.001;
+  const rangeY = maxY - minY || 0.001;
+  const pad = Math.max(rangeX, rangeY) * 0.05;
+
+  const points = projected.map(([x, y]) => `${x},${y}`).join(" ");
+
+  return `<svg viewBox="${minX - pad} ${minY - pad} ${rangeX + pad * 2} ${
+    rangeY + pad * 2
+  }" preserveAspectRatio="xMidYMid meet" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="3" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>`;
 }
 
 function formatDate(iso) {
