@@ -298,6 +298,10 @@ sup {
   }
 }
 
+.btn-destructive {
+  color: var(--color-accent-error);
+}
+
 .job-status {
   border-radius: 16px;
   color: white;

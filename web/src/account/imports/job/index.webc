@@ -62,6 +62,45 @@ title: Import - The Distance
     .delete-job-btn,
     .revert-job-btn {
       --color-active: var(--color-accent-error);
+      anchor-name: --destructive-confirm;
+    }
+  }
+
+  .confirm-popover {
+    background-color: var(--color-background);
+    border: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 8px;
+    max-width: 320px;
+    opacity: 1;
+    padding: 1rem;
+    position-anchor: --destructive-confirm;
+    position-area: bottom span-right;
+    top: 0.25rem;
+    transform: translateY(0);
+    transition: 0.15s ease;
+
+    &:popover-open {
+      @starting-style {
+        opacity: 0;
+        transform: translateY(-1rem);
+      }
+    }
+
+    p {
+      font-size: var(--font-size-0_75);
+      line-height: 1.3;
+    }
+
+    .confirm-actions {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      padding-top: 1rem;
+    }
+
+    .confirm-delete-btn,
+    .confirm-revert-btn {
+      --color-active: var(--color-accent-error);
     }
   }
 
@@ -303,7 +342,7 @@ title: Import - The Distance
     const controls = document.getElementById("job-controls");
     const buttons = [];
 
-    const deleteBtn = `<button type="button" class="delete-job-btn btn-secondary">
+    const deleteBtn = `<button type="button" class="delete-job-btn btn-secondary" popovertarget="confirm-delete">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 7l16 0" />
         <path d="M10 11l0 6" />
@@ -312,15 +351,44 @@ title: Import - The Distance
         <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />
       </svg>
       Delete Import…
-    </button>`;
+    </button>
+    <div popover id="confirm-delete" class="confirm-popover">
+      <p>This will permanently delete this import. Any previously imported Activities will not be affected.</p>
+      <div class="confirm-actions">
+        <button type="button" class="btn-secondary" popovertarget="confirm-delete">Cancel</button>
+        <button type="button" class="btn-secondary btn-destructive confirm-delete-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7l16 0" />
+            <path d="M10 11l0 6" />
+            <path d="M14 11l0 6" />
+            <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" />
+            <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />
+          </svg>
+          Delete
+        </button>
+      </div>
+    </div>`;
 
-    const revertBtn = `<button type="button" class="revert-job-btn btn-secondary">
+    const revertBtn = `<button type="button" class="revert-job-btn btn-secondary" popovertarget="confirm-revert">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 14l-4 -4l4 -4" />
         <path d="M5 10h11a4 4 0 1 1 0 8h-1" />
       </svg>
       Revert Import…
-    </button>`;
+    </button>
+    <div popover id="confirm-revert" class="confirm-popover">
+      <p>This will delete all Activities created by this imported. The import will return to preview state where you can rerun it.</p>
+      <div class="confirm-actions">
+        <button type="button" class="btn-secondary" popovertarget="confirm-revert">Cancel</button>
+        <button type="button" class="btn-secondary btn-destructive confirm-revert-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 14l-4 -4l4 -4" />
+            <path d="M5 10h11a4 4 0 1 1 0 8h-1" />
+          </svg>
+          Revert
+        </button>
+      </div>
+    </div>`;
 
     const recheckBtn = `<button type="button" class="recheck-job-btn btn-secondary">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -346,10 +414,10 @@ title: Import - The Distance
       .querySelector(".recheck-job-btn")
       ?.addEventListener("click", startRecheck);
     controls
-      .querySelector(".delete-job-btn")
+      .querySelector(".confirm-delete-btn")
       ?.addEventListener("click", deleteJob);
     controls
-      .querySelector(".revert-job-btn")
+      .querySelector(".confirm-revert-btn")
       ?.addEventListener("click", startRevert);
   }
 
@@ -536,7 +604,7 @@ title: Import - The Distance
   }
 
   async function deleteJob() {
-    if (!confirm("Delete this import job?")) return;
+    document.getElementById("confirm-delete").hidePopover();
 
     const btn = document.querySelector(".delete-job-btn");
     btn.disabled = true;
@@ -584,10 +652,7 @@ title: Import - The Distance
   }
 
   async function startRevert() {
-    if (
-      !confirm("Revert this import? All imported activities will be deleted.")
-    )
-      return;
+    document.getElementById("confirm-revert").hidePopover();
 
     const btn = document.querySelector(".revert-job-btn");
     btn.disabled = true;
