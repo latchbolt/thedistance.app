@@ -74,12 +74,13 @@ async function getUserByHandle(handle) {
  * @param {string} [did]
  * @returns {Promise<{data: Array|null, error: string|null}>}
  */
-async function getActivities(did, { limit } = {}) {
+async function getActivities(did, { limit, offset } = {}) {
   const path = did
     ? `/api/activities/${encodeURIComponent(did)}`
     : "/api/activities";
   const params = new URLSearchParams();
   if (limit) params.set("limit", limit);
+  if (offset) params.set("offset", offset);
   const qs = params.toString();
   const url = `${API_BASE}${path}${qs ? `?${qs}` : ""}`;
 

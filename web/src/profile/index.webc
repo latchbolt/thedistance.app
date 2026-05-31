@@ -76,6 +76,13 @@ title: Profile - The Distance
       width: 100%;
     }
   }
+
+  .load-more,
+  .load-more-end {
+    display: block;
+    margin: 2rem auto 0 auto;
+    text-align: center;
+  }
 </style>
 
 <script webc:bucket="components">
@@ -85,7 +92,12 @@ title: Profile - The Distance
   handle.textContent = `@${requestedHandle}`;
   document.title = `@${requestedHandle} is Going The Distance`;
 
+  const PAGE_SIZE = 50;
+  let profileDid = null;
+  let profileOffset = 0;
+
   async function renderProfile({ user }) {
+    profileDid = user.did;
     const { data } = await getActivities(user.did);
     const dname = document.querySelector(".profile-dname");
     dname.textContent = user.displayName || user.handle;
@@ -111,6 +123,54 @@ title: Profile - The Distance
     const list = document.getElementById("profile-activities");
     list.handle = user.handle;
     list.activities = data;
+
+    profileOffset = data.length;
+    if (data.length >= PAGE_SIZE) {
+      showLoadMore();
+    }
+  }
+
+  function showLoadMore() {
+    const list = document.getElementById("profile-activities");
+    const existing = list.querySelector(".load-more");
+    if (existing) existing.remove();
+
+    const btn = document.createElement("button");
+    btn.className = "btn-secondary load-more";
+    btn.textContent = "Load more";
+    btn.addEventListener("click", loadMore);
+    list.appendChild(btn);
+  }
+
+  async function loadMore() {
+    const btn = document.querySelector(".load-more");
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+
+    const { data } = await getActivities(profileDid, { offset: profileOffset });
+    const list = document.getElementById("profile-activities");
+
+    if (!data || data.length === 0) {
+      btn.remove();
+      list.insertAdjacentHTML(
+        "beforeend",
+        "<p class='load-more-end'>You went the distance.</p>"
+      );
+      return;
+    }
+
+    btn.remove();
+    list.appendActivities(data);
+    profileOffset += data.length;
+
+    if (data.length >= PAGE_SIZE) {
+      showLoadMore();
+    } else {
+      list.insertAdjacentHTML(
+        "beforeend",
+        "<p class='load-more-end'>You went the distance.</p>"
+      );
+    }
   }
 
   getUserByHandle(requestedHandle).then((foundUser) => {

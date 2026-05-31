@@ -48,100 +48,119 @@
         return;
       }
 
-      this.polylines = new Map();
+      if (!this.polylines) this.polylines = new Map();
       for (const activity of data) {
         if (activity.polyline && activity.rkey) {
           this.polylines.set(activity.rkey, activity.polyline);
         }
       }
 
-      const activitiesHTML = `
-      <ul>
-        ${data
-          .map((activity) => {
-            const stats = getActivityStats(activity).slice(0, 3);
+      this.querySelector("ul")?.remove();
+      this.insertAdjacentHTML(
+        "beforeend",
+        `<ul>${this.renderItems(data)}</ul>`
+      );
+      this.initMaps();
+    }
 
-            const ownerId = activity.owner_handle || activity.did;
-            const ownerURL = `/profile/${ownerId}`;
+    appendActivities(data) {
+      if (data.length === 0) return;
 
-            const activityURL = !activity.rkey
-              ? "#"
-              : `/profile/${ownerId}/activity/${activity.rkey}`;
+      if (!this.polylines) this.polylines = new Map();
+      for (const activity of data) {
+        if (activity.polyline && activity.rkey) {
+          this.polylines.set(activity.rkey, activity.polyline);
+        }
+      }
 
-            const activityTitle = activity.title;
+      const ul = this.querySelector("ul");
+      if (ul) {
+        ul.insertAdjacentHTML("beforeend", this.renderItems(data));
+        this.initMaps();
+      }
+    }
 
-            return `<li>
-              <div class="activity" id="activity-${activity.rkey}">
-                <header class="activity-header">
-                  ${
-                    activity.did && !this.profile
-                      ? `
-                    <a href="${ownerURL}" class="avatar">
-                      ${
-                        activity.owner_avatar_url
-                          ? `<img src="${activity.owner_avatar_url}" alt="" />`
-                          : ""
-                      }
-                    </a>`
-                      : ""
-                  }
-                  
-                  <div class="details">
-                    <div class="byline">
-                      ${
-                        activity.did && !this.profile
-                          ? `
-                      <a href="${ownerURL}">${this.getOwnerFullDisplayName(
-                              activity
-                            )}
-                      </a> • `
-                          : ""
-                      }
-                      <time datetime="${activity.started_at}">
-                        <a href=${activityURL}>${formatDate(
-              activity.started_at
-            )}</a>
-                      </time>
-                    </div>
-                    <a href=${activityURL} class="title">${activityTitle}</a>
+    renderItems(data) {
+      return data
+        .map((activity) => {
+          const stats = getActivityStats(activity).slice(0, 3);
 
+          const ownerId = activity.owner_handle || activity.did;
+          const ownerURL = `/profile/${ownerId}`;
+
+          const activityURL = !activity.rkey
+            ? "#"
+            : `/profile/${ownerId}/activity/${activity.rkey}`;
+
+          const activityTitle = activity.title;
+
+          return `<li>
+            <div class="activity" id="activity-${activity.rkey}">
+              <header class="activity-header">
+                ${
+                  activity.did && !this.profile
+                    ? `
+                  <a href="${ownerURL}" class="avatar">
                     ${
-                      activity.description
-                        ? `<p class="desc">${activity.description}</p>`
+                      activity.owner_avatar_url
+                        ? `<img src="${activity.owner_avatar_url}" alt="" />`
                         : ""
                     }
-                  
-                    <div class="activity-stats">
-                      ${stats
-                        .map((s) => {
-                          return `
-                            <div>
-                              <div class="stat-label">${s.label}</div>
-                              <div class="stat-value">${s.value}</div>
-                            </div>`;
-                        })
-                        .join("")}
-                    </div>
-                  </div>
-                </header>
-                ${
-                  activity.polyline
-                    ? `
-                    <a href="${activityURL}"><div class="activity-map" data-rkey="${
-                        activity.rkey
-                      }">${polylineToSVG(activity.polyline)}</div></a>
-                  `
+                  </a>`
                     : ""
                 }
-              </div>
-            </li>`;
-          })
-          .join("")}
-      </ul>`;
 
-      this.querySelector("ul")?.remove();
-      this.insertAdjacentHTML("beforeend", activitiesHTML);
-      this.initMaps();
+                <div class="details">
+                  <div class="byline">
+                    ${
+                      activity.did && !this.profile
+                        ? `
+                    <a href="${ownerURL}">${this.getOwnerFullDisplayName(
+                            activity
+                          )}
+                    </a> • `
+                        : ""
+                    }
+                    <time datetime="${activity.started_at}">
+                      <a href=${activityURL}>${formatDate(
+            activity.started_at
+          )}</a>
+                    </time>
+                  </div>
+                  <a href=${activityURL} class="title">${activityTitle}</a>
+
+                  ${
+                    activity.description
+                      ? `<p class="desc">${activity.description}</p>`
+                      : ""
+                  }
+
+                  <div class="activity-stats">
+                    ${stats
+                      .map((s) => {
+                        return `
+                          <div>
+                            <div class="stat-label">${s.label}</div>
+                            <div class="stat-value">${s.value}</div>
+                          </div>`;
+                      })
+                      .join("")}
+                  </div>
+                </div>
+              </header>
+              ${
+                activity.polyline
+                  ? `
+                  <a href="${activityURL}"><div class="activity-map" data-rkey="${
+                      activity.rkey
+                    }">${polylineToSVG(activity.polyline)}</div></a>
+                `
+                  : ""
+              }
+            </div>
+          </li>`;
+        })
+        .join("");
     }
 
     getOwnerFullDisplayName(activity) {
