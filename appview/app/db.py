@@ -517,6 +517,52 @@ def complete_import_job(conn, job_id, status="completed"):
     conn.commit()
 
 
+def reset_import_job_to_preview(conn, job_id):
+    """Reset a completed/reverting job back to preview state.
+
+    Zeros counters, clears completed_at, and strips rkey/did/imported
+    from each manifest item.
+    """
+    row = conn.execute(
+        "SELECT manifest FROM import_jobs WHERE id = %s", (job_id,)
+    ).fetchone()
+
+    if row and row["manifest"]:
+        cleaned = []
+        for item in row["manifest"]:
+            item.pop("rkey", None)
+            item.pop("did", None)
+            item.pop("imported", None)
+            cleaned.append(item)
+
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET status = 'preview', imported = 0, skipped = 0, failed = 0,
+                errors = '[]', completed_at = NULL, manifest = %s
+            WHERE id = %s
+        """,
+            (psycopg.types.json.Json(cleaned), job_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET status = 'preview', imported = 0, skipped = 0, failed = 0,
+                errors = '[]', completed_at = NULL
+            WHERE id = %s
+        """,
+            (job_id,),
+        )
+
+    conn.commit()
+
+
+def delete_import_job(conn, job_id):
+    conn.execute("DELETE FROM import_jobs WHERE id = %s", (job_id,))
+    conn.commit()
+
+
 def list_import_jobs_for_user(conn, did, limit=10):
     return conn.execute(
         """

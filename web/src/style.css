@@ -266,6 +266,36 @@ sup {
   }
 }
 
+.btn-secondary {
+  appearance: none;
+  background: none;
+  border: 1px dotted
+    color-mix(in srgb, currentColor var(--b-opacity, 30%), transparent);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 500;
+  padding: 0.2em 0.7em 0.25em 0.7em;
+
+  &:hover,
+  &:focus-visible {
+    --b-opacity: 60%;
+    color: var(--color-active, var(--color-accent-foreground));
+  }
+
+  &:has(svg) {
+    align-items: center;
+    display: flex;
+    column-gap: 0.25rem;
+
+    svg {
+      --size: 1.2em;
+      height: var(--size);
+      width: var(--size);
+    }
+  }
+}
+
 .job-status {
   border-radius: 16px;
   color: white;

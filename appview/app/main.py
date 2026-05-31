@@ -17,6 +17,9 @@ from app.db import (
     complete_import_job,
     create_import_job,
     delete_activity,
+    delete_import_job,
+    fetch_activities_in_range,
+    find_duplicates_in_list,
     get_import_job_for_user,
     get_oauth_session,
     delete_auth_request,
@@ -25,6 +28,7 @@ from app.db import (
     get_connection,
     init_db,
     list_import_jobs_for_user,
+    reset_import_job_to_preview,
     save_auth_request,
     save_oauth_session,
     set_import_job_manifest,
@@ -401,6 +405,16 @@ async def import_job_events(job_id: str, session: dict = Depends(require_auth)):
                     },
                 )
 
+            if status == "reverting":
+                yield sse_event(
+                    "progress",
+                    {
+                        "deleted": job["imported"],
+                        "skipped": job["skipped"],
+                        "total": job["total"],
+                    },
+                )
+
             if status == "completed":
                 yield sse_event(
                     "completed",
@@ -607,6 +621,186 @@ def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool 
         update_import_job_status(conn, job_id, "failed")
     finally:
         conn.close()
+
+
+@app.post("/api/import/jobs/{job_id}/revert")
+def revert_import_job_endpoint(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] != "completed":
+            return JSONResponse(
+                status_code=400, content={"error": "Only completed jobs can be reverted"}
+            )
+
+        update_import_job_status(conn, job_id, "reverting")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(revert_import_job, job_id, session["did"])
+
+    return {"job_id": job_id}
+
+
+def revert_import_job(job_id: str, did: str):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, did)
+        if not job or not job["manifest"]:
+            update_import_job_status(conn, job_id, "failed")
+            return
+
+        manifest = job["manifest"]
+        deleted = 0
+        skipped = 0
+        total = sum(1 for item in manifest if item.get("imported"))
+
+        for item in manifest:
+            if not item.get("imported") or not item.get("rkey"):
+                continue
+
+            rkey = item["rkey"]
+
+            session = get_oauth_session(conn, did)
+            if not session:
+                log.error("Session expired during revert of job %s", job_id)
+                break
+
+            pds_url = session["pds_url"]
+            url = f"{pds_url}/xrpc/com.atproto.repo.deleteRecord"
+            body = {
+                "repo": did,
+                "collection": "app.thedistance.activity",
+                "rkey": rkey,
+            }
+
+            try:
+                resp, _ = pds_request("POST", url, session, body)
+
+                if resp.status_code in [200, 201]:
+                    delete_activity(conn, did, rkey)
+                    deleted += 1
+                else:
+                    log.error(
+                        "PDS delete error during revert job %s rkey %s: %s",
+                        job_id, rkey, resp.text,
+                    )
+                    skipped += 1
+            except Exception as e:
+                log.exception("Failed to delete rkey %s during revert job %s", rkey, job_id)
+                skipped += 1
+
+            update_import_job_progress(conn, job_id, deleted, skipped, 0)
+
+        reset_import_job_to_preview(conn, job_id)
+    except Exception:
+        log.exception("Revert job %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
+
+
+@app.post("/api/import/jobs/{job_id}/recheck")
+def recheck_import_job_endpoint(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] != "preview":
+            return JSONResponse(
+                status_code=400, content={"error": "Job is not in preview state"}
+            )
+
+        update_import_job_status(conn, job_id, "processing")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(recheck_import_duplicates, job_id, session["did"])
+
+    return {"job_id": job_id}
+
+
+def recheck_import_duplicates(job_id: str, did: str):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, did)
+        if not job or not job["manifest"]:
+            update_import_job_status(conn, job_id, "failed")
+            return
+
+        manifest = job["manifest"]
+
+        started_times = []
+        for item in manifest:
+            sa = item["activity"].get("started_at")
+            if sa:
+                started_times.append(sa)
+
+        duplicates = 0
+        if started_times:
+            min_started = min(started_times)
+            max_started = max(started_times)
+            candidates = fetch_activities_in_range(conn, did, min_started, max_started)
+
+            for item in manifest:
+                needle = {
+                    "sport_type": item["activity"].get("sport_type"),
+                    "started_at": item["activity"].get("started_at"),
+                    "distance": item["activity"].get("distance"),
+                    "elapsed_time": item["activity"].get("elapsed_time"),
+                }
+                matches = find_duplicates_in_list(needle, candidates) if candidates else []
+                item["duplicate"] = bool(matches)
+                item["duplicate_of"] = matches[0].get("rkey") if matches else None
+                if item["duplicate"]:
+                    duplicates += 1
+        else:
+            for item in manifest:
+                item["duplicate"] = False
+                item["duplicate_of"] = None
+
+        set_import_job_manifest(conn, job_id, manifest, len(manifest), duplicates)
+    except Exception:
+        log.exception("Recheck job %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
+
+
+@app.delete("/api/import/jobs/{job_id}")
+def delete_import_job_endpoint(
+    job_id: str,
+    session: dict = Depends(require_auth),
+):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] not in ("preview", "failed"):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Only preview or failed jobs can be deleted"},
+            )
+
+        delete_import_job(conn, job_id)
+    finally:
+        conn.close()
+
+    return {"status": "deleted"}
 
 
 # --- Record management endpoints ---
