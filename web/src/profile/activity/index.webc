@@ -5,20 +5,129 @@ title: Activity - The Distance
 
 <div class="g-max-centered">
   <div class="contents">
-    <activity-list id="activity-detail" loading></activity-list>
+    <div id="activity-detail"></div>
   </div>
 </div>
 
 <style webc:scoped>
   .contents {
     margin: 0 auto;
-    max-width: var(--grid-max-5);
     padding-bottom: 2rem;
+  }
+
+  .activity {
+    background: var(--color-background);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .activity-header {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem 0;
+  }
+
+  .byline {
+    align-items: center;
+    display: flex;
+    font-size: var(--font-size-0_75);
+    gap: 0.25rem;
+    line-height: 1.2;
+    max-width: 100%;
+    overflow: hidden;
+    padding-bottom: 0.1rem;
+
+    a {
+      color: var(--color-foreground);
+      overflow: hidden;
+      text-decoration: none;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &:hover,
+      &:focus-visible {
+        text-decoration: underline;
+      }
+    }
+
+    b {
+      font-weight: 600;
+    }
+
+    time {
+      flex-shrink: 0;
+    }
+  }
+
+  .details {
+    flex: 1;
+    overflow: hidden;
+
+    .title {
+      font-weight: 600;
+      font-size: var(--font-size-2);
+    }
+  }
+
+  .activity-stats {
+    display: flex;
+    flex-wrap: wrap;
+    padding-top: 2rem;
+    column-gap: 1.5rem;
+    row-gap: 1rem;
+
+    > div {
+      min-width: 10ch;
+    }
+
+    .stat-label {
+      font-size: var(--font-size-0_75);
+      line-height: 0.9;
+    }
+
+    .stat-value {
+      font-size: var(--font-size-1_5);
+      font-weight: 600;
+      line-height: 1.1;
+    }
+  }
+
+  .avatar {
+    --size: 80px;
+    background: color-mix(in srgb, var(--color-foreground) 10%, transparent);
+    border-radius: 10px;
+    box-shadow: 0 0 1px
+      color-mix(in srgb, var(--color-foreground) 20%, transparent);
+    display: block;
+    flex-shrink: 0;
+    height: var(--size);
+    overflow: hidden;
+    width: var(--size);
+
+    img {
+      display: block;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      width: 100%;
+    }
+  }
+
+  .activity-map {
+    background: color-mix(in srgb, var(--color-foreground) 2%, transparent);
+    border-radius: 20px;
+    color: var(--color-accent-primary);
+    height: 550px;
+  }
+
+  .activity-description {
+    padding: 1rem;
+    white-space: pre-wrap;
   }
 </style>
 
 <script webc:bucket="components">
-  // URL: /profile/<did-or-handle>/activity/<rkey>/
   const activityPathMatch = window.location.pathname.match(
     /\/profile\/([^/]+)\/activity\/([^/]+)/
   );
@@ -26,14 +135,13 @@ title: Activity - The Distance
   const activityRkey = activityPathMatch ? activityPathMatch[2] : null;
 
   async function renderActivity() {
-    const list = document.getElementById("activity-detail");
+    const container = document.getElementById("activity-detail");
     let did = activityIdentifier;
 
     if (!activityIdentifier.startsWith("did:")) {
       const foundUser = await getUserByHandle(activityIdentifier);
       if (!foundUser) {
-        list.loading = false;
-        list.insertAdjacentHTML("beforeend", "<p>Activity not found</p>");
+        container.innerHTML = "<p>Activity not found</p>";
         return;
       }
       did = foundUser.did;
@@ -42,12 +150,108 @@ title: Activity - The Distance
     const { data, error } = await getActivity(did, activityRkey);
 
     if (error || !data) {
-      list.loading = false;
-      list.insertAdjacentHTML("beforeend", "<p>Activity not found</p>");
+      container.innerHTML = "<p>Activity not found</p>";
       return;
     }
 
-    list.activities = [data];
+    const activity = data;
+    const ownerId = activity.owner_handle || activity.did;
+    const ownerURL = `/profile/${ownerId}`;
+
+    let ownerName = ownerId;
+    if (activity.owner_display_name && activity.owner_handle) {
+      ownerName = `<b>${activity.owner_display_name}</b> @${activity.owner_handle}`;
+    } else if (activity.owner_display_name) {
+      ownerName = activity.owner_display_name;
+    } else if (activity.owner_handle) {
+      ownerName = `@${activity.owner_handle}`;
+    }
+
+    const stats = getActivityStats(activity);
+
+    const statsHTML = stats
+      .map(
+        (s) =>
+          `<div><div class="stat-label">${s.label}</div><div class="stat-value">${s.value}</div></div>`
+      )
+      .join("");
+
+    const mapHTML = activity.polyline
+      ? `<div class="activity-map" id="activity-map">${polylineToSVG(
+          activity.polyline
+        )}</div>`
+      : "";
+
+    container.innerHTML = `
+      <div class="activity">
+        <header class="activity-header">
+          <a href="${ownerURL}" class="avatar">
+            ${
+              activity.owner_avatar_url
+                ? `<img src="${activity.owner_avatar_url}" alt="" />`
+                : ""
+            }
+          </a>
+          <div class="details">
+            <div class="byline">
+              <a href="${ownerURL}">${ownerName}</a> &bull;
+              <time datetime="${activity.started_at}">${formatDate(
+      activity.started_at
+    )}</time>
+            </div>
+            <div class="title">${
+              activity.title || capitalize(activity.sport_type)
+            }</div>
+            ${
+              activity.description
+                ? `<p class="desc">${activity.description}</p>`
+                : ""
+            }
+            <div class="activity-stats">${statsHTML}</div>
+          </div>
+        </header>
+        ${mapHTML}
+      </div>
+    `;
+
+    if (activity.polyline) {
+      initActivityMap(activity.polyline);
+    }
+  }
+
+  function initActivityMap(encoded) {
+    const coords = decodePolyline(encoded);
+    if (coords.length < 2) return;
+
+    const bounds = coords.reduce(
+      (b, coord) => b.extend(coord),
+      new maplibregl.LngLatBounds(coords[0], coords[0])
+    );
+
+    const map = new maplibregl.Map({
+      container: "activity-map",
+      style: "https://tiles.openfreemap.org/styles/positron",
+      bounds: bounds,
+      fitBoundsOptions: { padding: 40 },
+      attributionControl: true,
+    });
+
+    map.on("load", () => {
+      map.addSource("route", {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: coords },
+        },
+      });
+
+      map.addLayer({
+        id: "route",
+        type: "line",
+        source: "route",
+        paint: { "line-color": "#FFE866", "line-width": 4 },
+      });
+    });
   }
 
   renderActivity();

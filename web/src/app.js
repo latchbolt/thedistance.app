@@ -246,6 +246,68 @@ function formatDate(iso) {
   });
 }
 
+function getActivityStats(activity) {
+  const hasDistance = parseInt(activity.distance, 10) > 0;
+  let stats = [];
+
+  if (hasDistance) {
+    stats.push({
+      label: "Distance",
+      value: `${metersToMiles(activity.distance)} mi`,
+    });
+  }
+
+  stats.push({
+    label: "Moving Time",
+    value: formatDuration(activity.moving_time),
+  });
+
+  if (activity.elevation_gain) {
+    stats.push({
+      label: "Elev Gain",
+      value: `${metersToFeet(activity.elevation_gain)} ft`,
+    });
+  }
+  if (activity.elevation_loss) {
+    stats.push({
+      label: "Elev Loss",
+      value: `${metersToFeet(activity.elevation_loss)} ft`,
+    });
+  }
+  if (activity.avg_speed) {
+    stats.push({
+      label: "Avg Speed",
+      value: `${msToMph(activity.avg_speed)} mph`,
+    });
+  }
+  if (activity.max_speed) {
+    stats.push({
+      label: "Max Speed",
+      value: `${msToMph(activity.max_speed)} mph`,
+    });
+  }
+  if (activity.avg_heart_rate) {
+    stats.push({ label: "Avg HR", value: `${activity.avg_heart_rate} bpm` });
+  }
+  if (activity.max_heart_rate) {
+    stats.push({ label: "Max HR", value: `${activity.max_heart_rate} bpm` });
+  }
+  if (activity.avg_cadence) {
+    stats.push({ label: "Avg Cadence", value: `${activity.avg_cadence}` });
+  }
+  if (activity.avg_power) {
+    stats.push({ label: "Avg Power", value: `${activity.avg_power} W` });
+  }
+  if (activity.max_power) {
+    stats.push({ label: "Max Power", value: `${activity.max_power} W` });
+  }
+  if (activity.calories) {
+    stats.push({ label: "Calories", value: `${activity.calories}` });
+  }
+
+  return stats;
+}
+
 function pluralize(n, singular, plural) {
   return n === 1 ? singular : plural;
 }

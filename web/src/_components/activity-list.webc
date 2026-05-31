@@ -59,24 +59,7 @@
       <ul>
         ${data
           .map((activity) => {
-            const stats = [
-              {
-                label: "Distance",
-                value: `${metersToMiles(activity.distance)} mi`,
-              },
-              {
-                label: "Moving Time",
-                value: `${formatDuration(activity.moving_time)}`,
-              },
-              ...(activity.elevation_gain
-                ? [
-                    {
-                      label: "Elev Gain",
-                      value: `${metersToFeet(activity.elevation_gain)} ft`,
-                    },
-                  ]
-                : []),
-            ];
+            const stats = getActivityStats(activity).slice(0, 3);
 
             const ownerId = activity.owner_handle || activity.did;
             const ownerURL = `/profile/${ownerId}`;
@@ -121,6 +104,12 @@
                       </time>
                     </div>
                     <a href=${activityURL} class="title">${activityTitle}</a>
+
+                    ${
+                      activity.description
+                        ? `<p class="desc">${activity.description}</p>`
+                        : ""
+                    }
                   
                     <div class="activity-stats">
                       ${stats
