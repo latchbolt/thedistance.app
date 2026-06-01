@@ -17,21 +17,17 @@ def get_connection():
 
 def init_db():
     with get_connection() as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 filename TEXT PRIMARY KEY,
                 applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-        """
-        )
+        """)
         conn.commit()
 
         applied = {
             row["filename"]
-            for row in conn.execute(
-                "SELECT filename FROM schema_migrations"
-            ).fetchall()
+            for row in conn.execute("SELECT filename FROM schema_migrations").fetchall()
         }
 
         migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
@@ -126,7 +122,11 @@ def upsert_activity(conn, did, rkey, record):
             record.get("device"),
             record.get("source"),
             record.get("sourceId"),
-            psycopg.types.json.Json(record["weather"]) if record.get("weather") else None,
+            (
+                psycopg.types.json.Json(record["weather"])
+                if record.get("weather")
+                else None
+            ),
             record["createdAt"],
         ),
     )
@@ -136,6 +136,11 @@ def upsert_activity(conn, did, rkey, record):
 def delete_activity(conn, did, rkey):
     conn.execute("DELETE FROM activities WHERE did = %s AND rkey = %s", (did, rkey))
     conn.commit()
+
+
+def get_rkeys_for_did(conn, did):
+    rows = conn.execute("SELECT rkey FROM activities WHERE did = %s", (did,)).fetchall()
+    return {row["rkey"] for row in rows}
 
 
 def get_cursor(conn):
@@ -335,19 +340,17 @@ def upsert_profile(conn, did, handle, display_name, description, avatar_url):
 
 
 def get_profile(conn, did):
-    return conn.execute(
-        "SELECT * FROM profiles WHERE did = %s", (did,)
-    ).fetchone()
+    return conn.execute("SELECT * FROM profiles WHERE did = %s", (did,)).fetchone()
 
 
 def has_profile(conn, did):
-    row = conn.execute(
-        "SELECT 1 FROM profiles WHERE did = %s", (did,)
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM profiles WHERE did = %s", (did,)).fetchone()
     return row is not None
 
 
-def fetch_activities_in_range(conn, did, min_started_at, max_started_at, padding_seconds=120):
+def fetch_activities_in_range(
+    conn, did, min_started_at, max_started_at, padding_seconds=120
+):
     """Fetch a user's existing activities within a time range (plus padding).
 
     Returns a list of dicts suitable for passing to find_duplicates_in_list().
@@ -365,8 +368,9 @@ def fetch_activities_in_range(conn, did, min_started_at, max_started_at, padding
     ).fetchall()
 
 
-def find_duplicates_in_list(needle, candidates, time_window=60,
-                            distance_tolerance=0.01, elapsed_tolerance=60):
+def find_duplicates_in_list(
+    needle, candidates, time_window=60, distance_tolerance=0.01, elapsed_tolerance=60
+):
     """Check a list of candidate activities against a single activity for duplicates.
 
     Pure logic, no database. Both needle and candidates use snake_case keys:
@@ -410,12 +414,17 @@ def find_duplicates_in_list(needle, candidates, time_window=60,
 
         cand_dist = to_float(candidate["distance"])
         if needle_dist > 0 and cand_dist > 0:
-            if abs(needle_dist - cand_dist) / max(needle_dist, cand_dist) > distance_tolerance:
+            if (
+                abs(needle_dist - cand_dist) / max(needle_dist, cand_dist)
+                > distance_tolerance
+            ):
                 continue
         elif needle_dist != cand_dist:
             continue
 
-        cand_elapsed = int(candidate["elapsed_time"]) if candidate["elapsed_time"] else 0
+        cand_elapsed = (
+            int(candidate["elapsed_time"]) if candidate["elapsed_time"] else 0
+        )
         if abs(needle_elapsed - cand_elapsed) > elapsed_tolerance:
             continue
 
