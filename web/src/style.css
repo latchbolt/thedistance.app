@@ -313,7 +313,8 @@ sup {
   text-transform: uppercase;
 
   &.processing,
-  &.importing {
+  &.importing,
+  &.reverting {
     background: var(--color-accent-primary);
     color: hsl(var(--color-foreground-hsl-light));
   }
