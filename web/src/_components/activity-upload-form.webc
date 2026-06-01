@@ -1,15 +1,12 @@
 <div webc:root>
   <form>
-    <label>
+    <file-drop-zone accept=".fit,.gpx,.tcx" multiple>
       <p>Drop one or more files here or <a>Browse</a> to select.</p>
       <p>
         Accepted file types: .fit, .gpx, .tcx. You’ll get a chance to preview
         before saving.
       </p>
-      <input type="file" accept=".fit,.gpx,.tcx" multiple hidden disabled />
-
-      <div class="messages"><p class="placeholder">&nbsp;</p></div>
-    </label>
+    </file-drop-zone>
   </form>
   <div class="activity-preview">
     <activity-list></activity-list>
@@ -47,86 +44,7 @@
     flex: 1;
   }
 
-  label {
-    border: 3px dashed
-      color-mix(in srgb, var(--color-accent-primary) 60%, transparent);
-    border-radius: 20px;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    row-gap: 0.75rem;
-    padding: 3rem 1.5rem 1rem 1.5rem;
-    position: relative;
-    text-align: center;
-
-    &:not(&:has(input[disabled])):where(:hover, :focus-within),
-    &.drag-over {
-      background-color: color-mix(
-        in srgb,
-        var(--color-accent-primary) 8%,
-        transparent
-      );
-      border-color: var(--color-accent-primary);
-    }
-
-    &:has(input[disabled]) {
-      border-color: color-mix(in srgb, currentColor 10%, transparent);
-      cursor: default;
-
-      a:not([href]) {
-        cursor: default;
-      }
-
-      p:not(.messages p) {
-        opacity: 50%;
-      }
-    }
-
-    p {
-      letter-spacing: -1%;
-      line-height: 1;
-    }
-
-    p:nth-of-type(1) {
-      font-size: var(--font-size-1_5);
-      font-weight: 500;
-    }
-
-    a {
-      cursor: pointer;
-      text-decoration: underline;
-    }
-
-    .messages {
-      bottom: 0;
-      display: flex;
-      justify-content: center;
-      left: 0;
-      width: 100%;
-
-      p {
-        background: hsl(var(--color-accent-foreground-hsl-dark));
-        border-radius: 16px;
-        color: white;
-        font-size: var(--font-size-0_75);
-        padding: 0.35rem 0.75rem;
-        text-align: center;
-
-        &.error {
-          background: var(--color-accent-error);
-        }
-
-        &.placeholder {
-          opacity: 0;
-        }
-      }
-
-      a {
-        color: inherit;
-      }
-    }
-  }
-
+  /* FIXME: This can use some/all of the global btn class */
   .btn {
     align-items: center;
     appearance: none;
@@ -189,73 +107,32 @@
         const { user } = e.detail;
 
         if (!user) {
-          this.showError("<a href='/login'>Log in</a> to upload Activities");
+          this.dropZone.showError(
+            "<a href=’/login’>Log in</a> to upload Activities"
+          );
           return;
         }
 
         this.user = user;
-        this.initDropZone();
+        this.dropZone.enable();
+      });
+
+      this.addEventListener("files-selected", (e) => {
+        this.handleUpload(e.detail.files);
       });
     }
 
-    initDropZone() {
-      const dropZone = this.querySelector("label");
-      const fileInput = this.querySelector("input[type=file]");
-
-      fileInput.removeAttribute("disabled");
-
-      dropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropZone.classList.add("drag-over");
-      });
-
-      dropZone.addEventListener("dragleave", () => {
-        dropZone.classList.remove("drag-over");
-      });
-
-      dropZone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        dropZone.classList.remove("drag-over");
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-          this.handleUpload(files);
-        }
-      });
-
-      fileInput.addEventListener("change", () => {
-        if (fileInput.files.length > 0) {
-          this.handleUpload(fileInput.files);
-        }
-      });
-    }
-
-    get form() {
-      return this.querySelector("form");
-    }
-
-    get messagesContainer() {
-      return this.querySelector(".messages");
+    get dropZone() {
+      return this.querySelector("file-drop-zone");
     }
 
     get activityList() {
       return this.querySelector("activity-list");
     }
 
-    showError(message) {
-      this.messagesContainer.innerHTML = `<p class="error">${message}</p>`;
-    }
-
-    showStatus(message) {
-      this.messagesContainer.innerHTML = `<p class="status">${message}</p>`;
-    }
-
-    clearMessages() {
-      this.messagesContainer.innerHTML = "<p class='placeholder'>&nbsp;</p>";
-    }
-
     async handleUpload(files) {
-      this.clearMessages();
-      this.showStatus("🎶 He’s going for speed…");
+      this.dropZone.clearMessages();
+      this.dropZone.showStatus("🎶 He’s going for speed…");
 
       const formData = new FormData();
       for (const file of files) {
@@ -271,8 +148,8 @@
 
         if (!res.ok) {
           const err = await res.json();
-          this.showError(err.error || "Upload failed");
-          this.clearMessages();
+          this.dropZone.showError(err.error || "Upload failed");
+          this.dropZone.clearMessages();
           return;
         }
 
@@ -280,17 +157,17 @@
         const activities = data.activities;
 
         if (activities.length === 0) {
-          this.clearMessages();
-          this.showError("No activities found in uploaded files");
+          this.dropZone.clearMessages();
+          this.dropZone.showError("No activities found in uploaded files");
           return;
         }
 
         this.parsedActivities = activities;
-        this.clearMessages();
+        this.dropZone.clearMessages();
         this.showPreview(activities);
       } catch (err) {
-        this.showError(err.message);
-        this.clearMessages();
+        this.dropZone.showError(err.message);
+        this.dropZone.clearMessages();
       }
     }
 
@@ -331,7 +208,7 @@
 
     async handleCreate() {
       this.setSaveButtonsLoading(true);
-      this.clearMessages();
+      this.dropZone.clearMessages();
 
       const errors = [];
       const created = [];
@@ -363,7 +240,7 @@
 
       if (errors.length > 0) {
         const errMsg = errors.map((e) => `${e}<br/>`).join("");
-        this.showError(errMsg);
+        this.dropZone.showError(errMsg);
         this.setSaveButtonsLoading(false);
         return;
       }

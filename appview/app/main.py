@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from urllib.parse import urlencode, urlparse
@@ -6,21 +7,34 @@ import httpx
 from authlib.jose import JsonWebKey
 from fastapi import BackgroundTasks, Depends, FastAPI, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import require_auth
 from app.backfill import backfill as run_backfill
 from app.config import get_settings
 from app.db import (
+    complete_import_job,
+    create_import_job,
     delete_activity,
+    delete_import_job,
+    fetch_activities_in_range,
+    find_duplicates_in_list,
+    get_import_job_for_user,
+    get_oauth_session,
     delete_auth_request,
     delete_oauth_session,
     get_auth_request,
     get_connection,
     init_db,
+    list_import_jobs_for_user,
+    reset_import_job_to_preview,
     save_auth_request,
     save_oauth_session,
+    set_import_job_manifest,
+    update_import_job_manifest,
+    update_import_job_progress,
+    update_import_job_status,
     update_oauth_session_pds_nonce,
     update_oauth_session_tokens,
     upsert_activity,
@@ -40,6 +54,7 @@ from app.identity import (
     resolve_identity,
 )
 from app.parse import parse_file
+from app.strava import process_strava_export
 from app.tid import generate_tid
 from app.oauth import (
     fetch_authserver_meta,
@@ -84,15 +99,89 @@ if CLIENT_PUB_JWK:
     assert "d" not in CLIENT_PUB_JWK, "Public JWK must not contain private key material"
 
 
+def pds_request(method: str, url: str, session: dict, body: dict | None = None):
+    """Make an authenticated PDS request, refreshing tokens if expired.
+
+    Returns (response, did) on success. Persists updated nonces and tokens.
+    Raises on network errors.
+    """
+    did = session["did"]
+
+    with httpx.Client() as client:
+        resp, dpop_pds_nonce = pds_authed_request(
+            client=client,
+            method=method,
+            url=url,
+            session=session,
+            body=body,
+        )
+
+    conn = get_connection()
+    try:
+        update_oauth_session_pds_nonce(conn, did, dpop_pds_nonce)
+    finally:
+        conn.close()
+
+    if resp.status_code == 401:
+        try:
+            resp_body = resp.json()
+        except Exception:
+            resp_body = {}
+
+        if resp_body.get("error") == "invalid_token":
+            log.info("Access token expired for %s, refreshing", did)
+            client_id, _ = compute_client_id(settings.app_url)
+
+            with httpx.Client() as client:
+                tokens, dpop_authserver_nonce = refresh_token_request(
+                    client=client,
+                    session=session,
+                    client_id=client_id,
+                    client_secret_jwk=CLIENT_SECRET_JWK,
+                )
+
+            conn = get_connection()
+            try:
+                update_oauth_session_tokens(
+                    conn,
+                    did,
+                    tokens["access_token"],
+                    tokens["refresh_token"],
+                    dpop_authserver_nonce,
+                )
+                session = get_oauth_session(conn, did)
+            finally:
+                conn.close()
+
+            with httpx.Client() as client:
+                resp, dpop_pds_nonce = pds_authed_request(
+                    client=client,
+                    method=method,
+                    url=url,
+                    session=session,
+                    body=body,
+                )
+
+            conn = get_connection()
+            try:
+                update_oauth_session_pds_nonce(conn, did, dpop_pds_nonce)
+            finally:
+                conn.close()
+
+    return resp, did
+
+
 def compute_client_id(app_url: str) -> tuple[str, str]:
     """Compute the OAuth client_id and redirect_uri from the app URL."""
     parsed = urlparse(app_url)
     if parsed.hostname == "127.0.0.1":
         redirect_uri = f"http://127.0.0.1:{parsed.port}/oauth/callback"
-        client_id = "http://localhost?" + urlencode({
-            "redirect_uri": redirect_uri,
-            "scope": OAUTH_SCOPE,
-        })
+        client_id = "http://localhost?" + urlencode(
+            {
+                "redirect_uri": redirect_uri,
+                "scope": OAUTH_SCOPE,
+            }
+        )
     else:
         url = app_url.rstrip("/")
         redirect_uri = f"{url}/oauth/callback"
@@ -110,6 +199,7 @@ def startup():
 
 
 # --- Activity endpoints ---
+
 
 @app.get("/api/activities")
 def list_activities(
@@ -154,6 +244,7 @@ def get_activity_endpoint(did: str, rkey: str):
 
 # --- Backfill endpoint ---
 
+
 @app.post("/api/backfill")
 def backfill_endpoint(
     req: dict,
@@ -180,6 +271,7 @@ def backfill_endpoint(
 
 # --- Identity endpoints ---
 
+
 @app.get("/api/resolve/{handle}")
 def resolve_handle_endpoint(handle: str):
     with httpx.Client() as client:
@@ -200,6 +292,7 @@ def resolve_handle_endpoint(handle: str):
 
 
 # --- File parsing endpoints ---
+
 
 @app.post("/api/parse")
 async def parse_files(
@@ -230,7 +323,488 @@ async def parse_files(
     return result
 
 
+# --- Import endpoints ---
+
+
+@app.get("/api/import/jobs")
+def list_import_jobs(session: dict = Depends(require_auth)):
+    conn = get_connection()
+    try:
+        rows = list_import_jobs_for_user(conn, session["did"])
+        return [row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get("/api/import/jobs/{job_id}")
+def get_import_job(job_id: str, session: dict = Depends(require_auth)):
+    conn = get_connection()
+    try:
+        row = get_import_job_for_user(conn, job_id, session["did"])
+        if not row:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        return row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@app.get("/api/import/jobs/{job_id}/events")
+async def import_job_events(job_id: str, session: dict = Depends(require_auth)):
+    conn = get_connection()
+    try:
+        row = get_import_job_for_user(conn, job_id, session["did"])
+        if not row:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+    finally:
+        conn.close()
+
+    async def event_stream():
+        last_status = None
+
+        while True:
+            conn = get_connection()
+            try:
+                row = get_import_job_for_user(conn, job_id, session["did"])
+            finally:
+                conn.close()
+
+            if not row:
+                yield sse_event("error", {"error": "Job not found"})
+                return
+
+            job = row_to_dict(row)
+            status = job["status"]
+
+            if status != last_status:
+                yield sse_event("status", {"status": status})
+                last_status = status
+
+            if status == "preview":
+                yield sse_event(
+                    "manifest",
+                    {
+                        "activities": job["manifest"],
+                        "total": job["total"],
+                        "duplicates": job["duplicates"],
+                    },
+                )
+                return
+
+            if status == "importing":
+                yield sse_event(
+                    "progress",
+                    {
+                        "imported": job["imported"],
+                        "skipped": job["skipped"],
+                        "failed": job["failed"],
+                        "total": job["total"],
+                    },
+                )
+
+            if status == "reverting":
+                yield sse_event(
+                    "progress",
+                    {
+                        "deleted": job["imported"],
+                        "skipped": job["skipped"],
+                        "total": job["total"],
+                    },
+                )
+
+            if status == "completed":
+                yield sse_event(
+                    "completed",
+                    {
+                        "imported": job["imported"],
+                        "skipped": job["skipped"],
+                        "failed": job["failed"],
+                        "errors": job["errors"],
+                        "manifest": job["manifest"],
+                    },
+                )
+                return
+
+            if status == "failed":
+                yield sse_event("failed", {"errors": job["errors"]})
+                return
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/import/strava")
+async def strava_preview(
+    file: UploadFile,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return JSONResponse(
+            status_code=400, content={"error": "Please upload a .zip file"}
+        )
+
+    zip_data = await file.read()
+
+    # Validate the zip before creating a job
+    import zipfile
+    from io import BytesIO
+
+    try:
+        with zipfile.ZipFile(BytesIO(zip_data)) as zf:
+            if not any(name.endswith("activities.csv") for name in zf.namelist()):
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "No activities.csv found in zip"},
+                )
+    except zipfile.BadZipFile:
+        return JSONResponse(
+            status_code=400, content={"error": "File is not a valid zip archive"}
+        )
+
+    job_id = generate_tid()
+    did = session["did"]
+
+    conn = get_connection()
+    try:
+        create_import_job(conn, job_id, did, "strava")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(process_strava_export_job, job_id, zip_data, did)
+
+    return {"job_id": job_id}
+
+
+def process_strava_export_job(job_id: str, zip_data: bytes, did: str):
+    conn = get_connection()
+    try:
+        result = process_strava_export(zip_data, did=did, conn=conn)
+        activities = result["activities"]
+        duplicates = sum(1 for a in activities if a["duplicate"])
+        set_import_job_manifest(conn, job_id, activities, len(activities), duplicates)
+    except Exception:
+        log.exception("Import job %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
+
+
+@app.post("/api/import/strava/run")
+def strava_run(
+    req: dict,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    job_id = req.get("job_id")
+    selected = req.get("selected")
+    dry_run = req.get("dry_run", False)
+
+    if not job_id or selected is None:
+        return JSONResponse(
+            status_code=400, content={"error": "job_id and selected are required"}
+        )
+
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] != "preview":
+            return JSONResponse(
+                status_code=400, content={"error": "Job is not in preview state"}
+            )
+
+        update_import_job_status(conn, job_id, "importing")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(
+        run_strava_import, job_id, session["did"], selected, dry_run
+    )
+
+    return {"job_id": job_id}
+
+
+def run_strava_import(job_id: str, did: str, selected: list[int], dry_run: bool = False):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, did)
+        if not job or not job["manifest"]:
+            update_import_job_status(conn, job_id, "failed")
+            return
+
+        manifest = job["manifest"]
+        imported = 0
+        skipped = 0
+        failed = 0
+        errors = []
+
+        for idx, item in enumerate(manifest):
+            if idx not in selected:
+                skipped += 1
+                update_import_job_progress(conn, job_id, imported, skipped, failed)
+                continue
+
+            activity = item["activity"]
+            record = {to_camel_case(k): v for k, v in activity.items()}
+            if record.get("weather"):
+                record["weather"] = {
+                    to_camel_case(k): v for k, v in record["weather"].items()
+                }
+            if item.get("activity_id"):
+                record["sourceId"] = item["activity_id"]
+
+            if dry_run:
+                manifest[idx]["imported"] = True
+                imported += 1
+                update_import_job_progress(conn, job_id, imported, skipped, failed)
+                continue
+
+            session = get_oauth_session(conn, did)
+            if not session:
+                errors.append({"index": idx, "error": "Session expired"})
+                failed += 1
+                update_import_job_progress(
+                    conn, job_id, imported, skipped, failed, errors
+                )
+                break
+
+            rkey = generate_tid()
+            pds_url = session["pds_url"]
+            url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
+            body = {
+                "repo": did,
+                "collection": "app.thedistance.activity",
+                "rkey": rkey,
+                "record": record,
+            }
+
+            try:
+                resp, _ = pds_request("POST", url, session, body)
+
+                if resp.status_code in [200, 201]:
+                    upsert_activity(conn, did, rkey, record)
+                    manifest[idx]["rkey"] = rkey
+                    manifest[idx]["did"] = did
+                    manifest[idx]["imported"] = True
+                    imported += 1
+                else:
+                    log.error(
+                        "PDS create error for job %s idx %d: %s", job_id, idx, resp.text
+                    )
+                    errors.append({"index": idx, "error": "PDS create failed"})
+                    failed += 1
+            except Exception as e:
+                log.exception("Failed to import activity %d in job %s", idx, job_id)
+                errors.append({"index": idx, "error": str(e)})
+                failed += 1
+
+            update_import_job_progress(
+                conn, job_id, imported, skipped, failed, errors if errors else None
+            )
+
+        update_import_job_manifest(conn, job_id, manifest)
+        complete_import_job(conn, job_id)
+    except Exception:
+        log.exception("Import run %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
+
+
+@app.post("/api/import/jobs/{job_id}/revert")
+def revert_import_job_endpoint(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] != "completed":
+            return JSONResponse(
+                status_code=400, content={"error": "Only completed jobs can be reverted"}
+            )
+
+        update_import_job_status(conn, job_id, "reverting")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(revert_import_job, job_id, session["did"])
+
+    return {"job_id": job_id}
+
+
+def revert_import_job(job_id: str, did: str):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, did)
+        if not job or not job["manifest"]:
+            update_import_job_status(conn, job_id, "failed")
+            return
+
+        manifest = job["manifest"]
+        deleted = 0
+        skipped = 0
+        total = sum(1 for item in manifest if item.get("imported"))
+
+        for item in manifest:
+            if not item.get("imported") or not item.get("rkey"):
+                continue
+
+            rkey = item["rkey"]
+
+            session = get_oauth_session(conn, did)
+            if not session:
+                log.error("Session expired during revert of job %s", job_id)
+                break
+
+            pds_url = session["pds_url"]
+            url = f"{pds_url}/xrpc/com.atproto.repo.deleteRecord"
+            body = {
+                "repo": did,
+                "collection": "app.thedistance.activity",
+                "rkey": rkey,
+            }
+
+            try:
+                resp, _ = pds_request("POST", url, session, body)
+
+                if resp.status_code in [200, 201]:
+                    delete_activity(conn, did, rkey)
+                    deleted += 1
+                else:
+                    log.error(
+                        "PDS delete error during revert job %s rkey %s: %s",
+                        job_id, rkey, resp.text,
+                    )
+                    skipped += 1
+            except Exception as e:
+                log.exception("Failed to delete rkey %s during revert job %s", rkey, job_id)
+                skipped += 1
+
+            update_import_job_progress(conn, job_id, deleted, skipped, 0)
+
+        reset_import_job_to_preview(conn, job_id)
+    except Exception:
+        log.exception("Revert job %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
+
+
+@app.post("/api/import/jobs/{job_id}/recheck")
+def recheck_import_job_endpoint(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(require_auth),
+):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] != "preview":
+            return JSONResponse(
+                status_code=400, content={"error": "Job is not in preview state"}
+            )
+
+        update_import_job_status(conn, job_id, "processing")
+    finally:
+        conn.close()
+
+    background_tasks.add_task(recheck_import_duplicates, job_id, session["did"])
+
+    return {"job_id": job_id}
+
+
+def recheck_import_duplicates(job_id: str, did: str):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, did)
+        if not job or not job["manifest"]:
+            update_import_job_status(conn, job_id, "failed")
+            return
+
+        manifest = job["manifest"]
+
+        started_times = []
+        for item in manifest:
+            sa = item["activity"].get("started_at")
+            if sa:
+                started_times.append(sa)
+
+        duplicates = 0
+        if started_times:
+            min_started = min(started_times)
+            max_started = max(started_times)
+            candidates = fetch_activities_in_range(conn, did, min_started, max_started)
+
+            for item in manifest:
+                needle = {
+                    "sport_type": item["activity"].get("sport_type"),
+                    "started_at": item["activity"].get("started_at"),
+                    "distance": item["activity"].get("distance"),
+                    "elapsed_time": item["activity"].get("elapsed_time"),
+                }
+                matches = find_duplicates_in_list(needle, candidates) if candidates else []
+                item["duplicate"] = bool(matches)
+                item["duplicate_of"] = matches[0].get("rkey") if matches else None
+                if item["duplicate"]:
+                    duplicates += 1
+        else:
+            for item in manifest:
+                item["duplicate"] = False
+                item["duplicate_of"] = None
+
+        set_import_job_manifest(conn, job_id, manifest, len(manifest), duplicates)
+    except Exception:
+        log.exception("Recheck job %s failed", job_id)
+        conn.rollback()
+        update_import_job_status(conn, job_id, "failed")
+    finally:
+        conn.close()
+
+
+@app.delete("/api/import/jobs/{job_id}")
+def delete_import_job_endpoint(
+    job_id: str,
+    session: dict = Depends(require_auth),
+):
+    conn = get_connection()
+    try:
+        job = get_import_job_for_user(conn, job_id, session["did"])
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if job["status"] not in ("preview", "failed"):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Only preview or failed jobs can be deleted"},
+            )
+
+        delete_import_job(conn, job_id)
+    finally:
+        conn.close()
+
+    return {"status": "deleted"}
+
+
 # --- Record management endpoints ---
+
 
 def to_camel_case(s):
     parts = s.split("_")
@@ -244,11 +818,19 @@ def create_activity_endpoint(
 ):
     record = {to_camel_case(k): v for k, v in req.items()}
 
-    required = ["sportType", "startedAt", "elapsedTime", "movingTime", "distance", "createdAt"]
+    required = [
+        "sportType",
+        "startedAt",
+        "elapsedTime",
+        "movingTime",
+        "distance",
+        "createdAt",
+    ]
     missing = [f for f in required if f not in record]
     if missing:
         return JSONResponse(
-            status_code=400, content={"error": f"Missing required fields: {', '.join(missing)}"}
+            status_code=400,
+            content={"error": f"Missing required fields: {', '.join(missing)}"},
         )
 
     rkey = generate_tid()
@@ -262,10 +844,7 @@ def create_activity_endpoint(
     }
 
     try:
-        with httpx.Client() as client:
-            resp, dpop_pds_nonce = pds_authed_request(
-                client=client, method="POST", url=url, session=session, body=body,
-            )
+        resp, did = pds_request("POST", url, session, body)
     except httpx.TimeoutException:
         log.error("PDS request timed out for %s", session["did"])
         return JSONResponse(status_code=504, content={"error": "PDS request timed out"})
@@ -273,19 +852,19 @@ def create_activity_endpoint(
         log.error("PDS request failed for %s: %s", session["did"], e)
         return JSONResponse(status_code=502, content={"error": "Failed to reach PDS"})
 
-    conn = get_connection()
-    try:
-        update_oauth_session_pds_nonce(conn, session["did"], dpop_pds_nonce)
-        if resp.status_code in [200, 201]:
-            upsert_activity(conn, session["did"], rkey, record)
-    finally:
-        conn.close()
-
-    if resp.status_code not in [200, 201]:
+    if resp.status_code in [200, 201]:
+        conn = get_connection()
+        try:
+            upsert_activity(conn, did, rkey, record)
+        finally:
+            conn.close()
+    else:
         log.error("PDS create error: %s", resp.text)
-        return JSONResponse(status_code=resp.status_code, content={"error": "PDS create failed"})
+        return JSONResponse(
+            status_code=resp.status_code, content={"error": "PDS create failed"}
+        )
 
-    return {"status": "created", "rkey": rkey, "did": session["did"]}
+    return {"status": "created", "rkey": rkey, "did": did}
 
 
 @app.delete("/api/activities/{did}/{rkey}")
@@ -295,7 +874,9 @@ def delete_activity_endpoint(
     session: dict = Depends(require_auth),
 ):
     if did != session["did"]:
-        return JSONResponse(status_code=403, content={"error": "You can only delete your own records"})
+        return JSONResponse(
+            status_code=403, content={"error": "You can only delete your own records"}
+        )
 
     pds_url = session["pds_url"]
     url = f"{pds_url}/xrpc/com.atproto.repo.deleteRecord"
@@ -306,10 +887,7 @@ def delete_activity_endpoint(
     }
 
     try:
-        with httpx.Client() as client:
-            resp, dpop_pds_nonce = pds_authed_request(
-                client=client, method="POST", url=url, session=session, body=body,
-            )
+        resp, _ = pds_request("POST", url, session, body)
     except httpx.TimeoutException:
         log.error("PDS request timed out for %s", session["did"])
         return JSONResponse(status_code=504, content={"error": "PDS request timed out"})
@@ -317,22 +895,23 @@ def delete_activity_endpoint(
         log.error("PDS request failed for %s: %s", session["did"], e)
         return JSONResponse(status_code=502, content={"error": "Failed to reach PDS"})
 
-    conn = get_connection()
-    try:
-        update_oauth_session_pds_nonce(conn, session["did"], dpop_pds_nonce)
-        if resp.status_code in [200, 201]:
+    if resp.status_code in [200, 201]:
+        conn = get_connection()
+        try:
             delete_activity(conn, did, rkey)
-    finally:
-        conn.close()
-
-    if resp.status_code not in [200, 201]:
+        finally:
+            conn.close()
+    else:
         log.error("PDS delete error: %s", resp.text)
-        return JSONResponse(status_code=resp.status_code, content={"error": "PDS delete failed"})
+        return JSONResponse(
+            status_code=resp.status_code, content={"error": "PDS delete failed"}
+        )
 
     return {"status": "deleted"}
 
 
 # --- OAuth endpoints ---
+
 
 @app.get("/oauth-client-metadata.json")
 def oauth_client_metadata():
@@ -436,8 +1015,15 @@ def oauth_login(req: dict):
     conn = get_connection()
     try:
         save_auth_request(
-            conn, state, authserver_meta["issuer"], did, handle, pds_url,
-            pkce_verifier, OAUTH_SCOPE, dpop_authserver_nonce,
+            conn,
+            state,
+            authserver_meta["issuer"],
+            did,
+            handle,
+            pds_url,
+            pkce_verifier,
+            OAUTH_SCOPE,
+            dpop_authserver_nonce,
             dpop_private_jwk.as_json(is_private=True),
         )
     finally:
@@ -445,7 +1031,9 @@ def oauth_login(req: dict):
 
     auth_url = authserver_meta["authorization_endpoint"]
     if not is_safe_url(auth_url):
-        return JSONResponse(status_code=400, content={"error": "Unsafe authorization URL"})
+        return JSONResponse(
+            status_code=400, content={"error": "Unsafe authorization URL"}
+        )
     qparam = urlencode({"client_id": client_id, "request_uri": par_request_uri})
     return {"redirect_url": f"{auth_url}?{qparam}"}
 
@@ -465,13 +1053,17 @@ def oauth_callback(request: Request):
     code = request.query_params.get("code")
 
     if not all([state, authserver_iss, code]):
-        return JSONResponse(status_code=400, content={"error": "Missing callback parameters"})
+        return JSONResponse(
+            status_code=400, content={"error": "Missing callback parameters"}
+        )
 
     conn = get_connection()
     try:
         auth_req = get_auth_request(conn, state)
         if not auth_req:
-            return JSONResponse(status_code=400, content={"error": "OAuth request not found"})
+            return JSONResponse(
+                status_code=400, content={"error": "OAuth request not found"}
+            )
 
         delete_auth_request(conn, state)
 
@@ -500,32 +1092,43 @@ def oauth_callback(request: Request):
                 pds_url = auth_req["pds_url"]
                 if tokens["sub"] != did:
                     return JSONResponse(
-                        status_code=400, content={"error": "DID mismatch in token response"}
+                        status_code=400,
+                        content={"error": "DID mismatch in token response"},
                     )
             else:
                 did = tokens["sub"]
                 if not is_valid_did(did):
                     return JSONResponse(
-                        status_code=400, content={"error": "Invalid DID in token response"}
+                        status_code=400,
+                        content={"error": "Invalid DID in token response"},
                     )
                 did, handle, pds_url = resolve_identity(client, did)
                 verified_authserver = resolve_pds_authserver(client, pds_url)
                 if verified_authserver != authserver_iss:
                     return JSONResponse(
-                        status_code=400, content={"error": "Authorization server mismatch"}
+                        status_code=400,
+                        content={"error": "Authorization server mismatch"},
                     )
 
             profile = fetch_profile(client, did, pds_url)
 
         save_oauth_session(
-            conn, did, handle, pds_url, authserver_iss,
-            tokens["access_token"], tokens["refresh_token"],
-            dpop_authserver_nonce, auth_req["dpop_private_jwk"],
+            conn,
+            did,
+            handle,
+            pds_url,
+            authserver_iss,
+            tokens["access_token"],
+            tokens["refresh_token"],
+            dpop_authserver_nonce,
+            auth_req["dpop_private_jwk"],
         )
 
         if profile:
             upsert_profile(
-                conn, did, handle,
+                conn,
+                did,
+                handle,
                 profile["display_name"],
                 profile["description"],
                 profile["avatar_url"],
@@ -538,7 +1141,9 @@ def oauth_callback(request: Request):
     request.session["user_did"] = did
     request.session["user_handle"] = handle
 
-    return RedirectResponse(url=f"{settings.frontend_url}/profile/{handle}", status_code=302)
+    return RedirectResponse(
+        url=f"{settings.frontend_url}/profile/{handle}", status_code=302
+    )
 
 
 @app.post("/oauth/refresh")
@@ -556,8 +1161,10 @@ def oauth_refresh(request: Request, session: dict = Depends(require_auth)):
     conn = get_connection()
     try:
         update_oauth_session_tokens(
-            conn, session["did"],
-            tokens["access_token"], tokens["refresh_token"],
+            conn,
+            session["did"],
+            tokens["access_token"],
+            tokens["refresh_token"],
             dpop_authserver_nonce,
         )
     finally:

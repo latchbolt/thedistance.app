@@ -15,13 +15,19 @@ export default function (eleventyConfig) {
     "node_modules/maplibre-gl/dist/maplibre-gl.css": "vendor/maplibre-gl.css",
   });
 
+  eleventyConfig.addWatchTarget("src/_components/");
+
   eleventyConfig.setServerOptions({
     domDiff: false,
     hostname: "127.0.0.1",
     middleware: [
       function (req, _res, next) {
+        // Rewrite /account/imports/<job_id> to /account/imports/job/index.html
+        if (req.url.match(/^\/account\/imports\/[^/]+\/?$/)) {
+          req.url = "/account/imports/job/index.html";
+        }
         // Rewrite /profile/<did>/activity/<rkey> to /profile/activity/index.html
-        if (req.url.match(/^\/profile\/[^/]+\/activity\/[^/]+\/?$/)) {
+        else if (req.url.match(/^\/profile\/[^/]+\/activity\/[^/]+\/?$/)) {
           req.url = "/profile/activity/index.html";
         }
         // Rewrite /profile/<handle> to /profile/index.html

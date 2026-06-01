@@ -43,9 +43,8 @@ title: About - The Distance
 
 <style webc:scoped>
   .contents {
-    margin: 0 auto;
     max-width: var(--grid-max-4);
-    padding-top: 2rem;
+    padding-top: 1rem;
 
     p + p {
       margin-top: 1rem;

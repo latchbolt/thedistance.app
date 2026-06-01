@@ -1,0 +1,165 @@
+---
+layout: layout.webc
+title: Imports - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <account-nav></account-nav>
+      <div class="header-lockup">
+        <h2>Imports</h2>
+        <a href="/import" class="btn-secondary">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.5"
+            viewBox="0 0 24 24"
+          >
+            <path d="M12 5l0 14" />
+            <path d="M5 12l14 0" />
+          </svg>
+          New
+        </a>
+      </div>
+    </header>
+
+    <div id="import-jobs"></div>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+
+  .header-lockup {
+    align-items: center;
+    display: flex;
+    column-gap: 0.5rem;
+
+    .btn-secondary {
+      font-size: var(--font-size-0_75);
+    }
+  }
+
+  .job-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    flex-direction: column;
+  }
+
+  .job-list a {
+    background: var(--color-background);
+    border-bottom: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
+    color: inherit;
+    display: block;
+    text-decoration: none;
+    padding: 0.5rem 0;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--color-accent-foreground);
+    }
+  }
+
+  .job-list li:last-child a {
+    border-bottom: 0;
+  }
+
+  .job-source {
+    font-size: var(--font-size-1);
+    font-weight: 600;
+    line-height: 1.1;
+    text-transform: capitalize;
+  }
+
+  .job-meta {
+    font-size: var(--font-size-0_75);
+    padding-bottom: 0.5rem;
+  }
+
+  .job-stats {
+    font-size: var(--font-size-0_75);
+    display: flex;
+    gap: 0.5rem;
+  }
+</style>
+
+<script webc:bucket="components">
+  document.addEventListener("afterAuthCheck", async (e) => {
+    const { user } = e.detail;
+    const container = document.getElementById("import-jobs");
+
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/import/jobs`, FETCH_OPTS);
+      if (!res.ok) {
+        container.innerHTML = "<p>Failed to load Imports</p>";
+        return;
+      }
+
+      const jobs = await res.json();
+
+      if (jobs.length === 0) {
+        container.innerHTML = "<p>No Imports</p>";
+        return;
+      }
+
+      container.innerHTML = `<ul class="job-list">
+        ${jobs
+          .map((job) => {
+            const date = formatDate(job.created_at);
+
+            return `<li>
+              <a href="/account/imports/${job.id}">
+                <span class="job-source">${job.source}</span>
+                <div class="job-meta">
+                  <span class="job-status ${job.status}">${job.status}</span>
+                  <time datetime="${job.created_at}">${date}</time>
+                </div>
+
+                ${
+                  job.status === "completed"
+                    ? `<span class="job-stats">${job.imported} Activities imported</span>`
+                    : ""
+                }
+
+                ${
+                  job.status !== "completed" && job.total > 0
+                    ? `
+                <span class="job-stats">
+                  <span>${job.total} Activities</span>
+                  ${
+                    job.duplicates
+                      ? `<span>${job.duplicates} Duplicates</span>`
+                      : ""
+                  }
+                </span>`
+                    : ""
+                }
+              </a>
+            </li>`;
+          })
+          .join("")}
+      </ul>`;
+    } catch (err) {
+      container.innerHTML = "<p>Failed to load imports</p>";
+    }
+  });
+</script>

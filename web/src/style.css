@@ -78,6 +78,11 @@ h6 {
   isolation: isolate;
 }
 
+[popover] {
+  color: inherit;
+  padding: 0;
+}
+
 @font-face {
   font-family: "Hanken Grotesk";
   src: url("/fonts/HankenGrotesk-VariableFont_wght.ttf") format("truetype");
@@ -107,6 +112,7 @@ h6 {
   --color-accent-foreground-hsl-light: 223 100% 53%;
   --color-accent-foreground-hsl-dark: 223 100% 70%;
   --color-accent-error: hsl(0 80% 55%);
+  --color-accent-success: hsl(120 100% 70%);
 
   /*
     Color tokens. These should be used most often.
@@ -126,6 +132,7 @@ h6 {
   );
 
   /* Font sizes. Base: 1rem/16px. Full step: 8px. Half step: 4px. */
+  --font-size-0_5: 0.75rem; /* 12px */
   --font-size-0_75: 0.875rem; /* 14px */
   --font-size-1: 1rem; /* 16px */
   --font-size-1_5: 1.25rem; /* 20px */
@@ -210,4 +217,118 @@ strong {
 sup {
   font-size: 120%;
   vertical-align: baseline;
+}
+
+.btn {
+  align-items: center;
+  appearance: none;
+  background-color: var(--color-accent-primary);
+  border: 0;
+  border-radius: 16px;
+  color: hsl(var(--color-foreground-hsl-light));
+  cursor: pointer;
+  display: grid;
+  justify-content: center;
+  line-height: 1;
+  padding: 0.65rem 0.5rem;
+  font-family: var(--font-display);
+  font-size: var(--font-size-2);
+  text-box-trim: trim-end;
+  text-transform: uppercase;
+  width: 100%;
+
+  > * {
+    grid-area: 1 / 1;
+  }
+
+  dink-us {
+    --height: 0.7rem;
+    --bg-color: currentColor;
+    margin-top: 0.25rem;
+    pointer-events: none;
+    min-width: 80px;
+
+    & > div:not(:nth-child(3)) {
+      flex: 1;
+    }
+
+    & > div:nth-child(2) {
+      max-width: 1.2rem;
+    }
+  }
+
+  .hidden {
+    opacity: 0;
+  }
+
+  &[disabled] {
+    cursor: not-allowed;
+  }
+}
+
+.btn-secondary {
+  appearance: none;
+  background: var(--color-background);
+  border: 1px dotted
+    color-mix(in srgb, currentColor var(--b-opacity, 30%), transparent);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 500;
+  padding: 0.2em 0.7em 0.25em 0.7em;
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    --b-opacity: 60%;
+    color: var(--color-active, var(--color-accent-foreground));
+  }
+
+  &:has(svg) {
+    align-items: center;
+    display: inline-flex;
+    column-gap: 0.25rem;
+    padding-left: 0.5em;
+
+    svg {
+      --size: 1.2em;
+      height: var(--size);
+      width: var(--size);
+    }
+  }
+}
+
+.btn-destructive {
+  color: var(--color-accent-error);
+}
+
+.job-status {
+  border-radius: 16px;
+  color: white;
+  display: inline-block;
+  font-size: var(--font-size-0_5);
+  font-weight: 600;
+  padding: 0.1em 0.65em;
+  text-align: center;
+  text-transform: uppercase;
+
+  &.processing,
+  &.importing {
+    background: var(--color-accent-primary);
+    color: hsl(var(--color-foreground-hsl-light));
+  }
+
+  &.preview {
+    background: hsl(var(--color-accent-foreground-hsl-dark));
+  }
+
+  &.failed {
+    background: var(--color-accent-error);
+  }
+
+  &.success,
+  &.completed {
+    background: var(--color-accent-success);
+    color: hsl(var(--color-foreground-hsl-light));
+  }
 }

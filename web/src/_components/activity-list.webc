@@ -24,6 +24,18 @@
       }
     }
 
+    get profile() {
+      return this.hasAttribute("profile");
+    }
+
+    set profile(value) {
+      if (value) {
+        this.setAttribute("profile", "");
+      } else {
+        this.removeAttribute("profile");
+      }
+    }
+
     set activities(data) {
       this.loading = false;
       this.querySelector(".preview").classList.add("hidden");
@@ -36,107 +48,121 @@
         return;
       }
 
-      const activitiesHTML = `
-      <ul>
-        ${data
-          .map((activity) => {
-            const stats = [
-              {
-                label: "Distance",
-                value: `${metersToMiles(activity.distance)} mi`,
-              },
-              {
-                label: "Moving Time",
-                value: `${formatDuration(activity.moving_time)}`,
-              },
-              ...(activity.elevation_gain
-                ? [
-                    {
-                      label: "Elev Gain",
-                      value: `${metersToFeet(activity.elevation_gain)} ft`,
-                    },
-                  ]
-                : []),
-            ];
-
-            const ownerId = activity.owner_handle || activity.did;
-            const ownerURL = `/profile/${ownerId}`;
-
-            const activityURL = !activity.rkey
-              ? "#"
-              : `/profile/${ownerId}/activity/${activity.rkey}`;
-
-            const activityTitle = activity.title;
-
-            return `<li>
-              <div class="activity" id="activity-${activity.rkey}">
-                <header class="activity-header">
-                  ${
-                    activity.did
-                      ? `
-                    <a href="${ownerURL}" class="avatar">
-                      ${
-                        activity.owner_avatar_url
-                          ? `<img src="${activity.owner_avatar_url}" alt="" />`
-                          : ""
-                      }
-                    </a>`
-                      : ""
-                  }
-                  
-                  <div class="details">
-                    <div class="byline">
-                      ${
-                        activity.did
-                          ? `
-                      <a href="${ownerURL}">${this.getOwnerFullDisplayName(
-                              activity
-                            )}
-                      </a> • `
-                          : ""
-                      }
-                      <time datetime="${activity.started_at}">
-                        <a href=${activityURL}>${formatDate(
-              activity.started_at
-            )}</a>
-                      </time>
-                    </div>
-                    <a href=${activityURL} class="title">${activityTitle}</a>
-                  
-                    <div class="activity-stats">
-                      ${stats
-                        .map((s) => {
-                          return `
-                            <div>
-                              <div class="stat-label">${s.label}</div>
-                              <div class="stat-value">${s.value}</div>
-                            </div>`;
-                        })
-                        .join("")}
-                    </div>
-                  </div>
-                </header>
-                <div class="activity-map" data-rkey="${activity.rkey}"></div>
-              </div>
-            </li>`;
-          })
-          .join("")}
-      </ul>`;
+      if (!this.polylines) this.polylines = new Map();
+      for (const activity of data) {
+        if (activity.polyline && activity.rkey) {
+          this.polylines.set(activity.rkey, activity.polyline);
+        }
+      }
 
       this.querySelector("ul")?.remove();
-      this.insertAdjacentHTML("beforeend", activitiesHTML);
-      this.initMaps(data);
+      this.insertAdjacentHTML(
+        "beforeend",
+        `<ul>${this.renderItems(data)}</ul>`
+      );
+      this.initMaps();
     }
 
-    /**
-     * Build an HTML string for the activity owner's name. Returns the best
-     * available combination: "Display Name @handle", falling back to just
-     * the display name, just the @handle, or the DID as a last resort.
-     *
-     * @param {Object} activity - An activity object with owner_display_name,
-     *   owner_handle, and did fields.
-     * @returns {string} HTML string for the owner's display name.
-     */
+    appendActivities(data) {
+      if (data.length === 0) return;
+
+      if (!this.polylines) this.polylines = new Map();
+      for (const activity of data) {
+        if (activity.polyline && activity.rkey) {
+          this.polylines.set(activity.rkey, activity.polyline);
+        }
+      }
+
+      const ul = this.querySelector("ul");
+      if (ul) {
+        ul.insertAdjacentHTML("beforeend", this.renderItems(data));
+        this.initMaps();
+      }
+    }
+
+    renderItems(data) {
+      return data
+        .map((activity) => {
+          const stats = getActivityStats(activity).slice(0, 3);
+
+          const ownerId = activity.owner_handle || activity.did;
+          const ownerURL = `/profile/${ownerId}`;
+
+          const activityURL = !activity.rkey
+            ? "#"
+            : `/profile/${ownerId}/activity/${activity.rkey}`;
+
+          const activityTitle = activity.title;
+
+          return `<li>
+            <div class="activity" id="activity-${activity.rkey}">
+              <header class="activity-header">
+                ${
+                  activity.did && !this.profile
+                    ? `
+                  <a href="${ownerURL}" class="avatar">
+                    ${
+                      activity.owner_avatar_url
+                        ? `<img src="${activity.owner_avatar_url}" alt="" />`
+                        : ""
+                    }
+                  </a>`
+                    : ""
+                }
+
+                <div class="details">
+                  <div class="byline">
+                    ${
+                      activity.did && !this.profile
+                        ? `
+                    <a href="${ownerURL}">${this.getOwnerFullDisplayName(
+                            activity
+                          )}
+                    </a> • `
+                        : ""
+                    }
+                    <time datetime="${activity.started_at}">
+                      <a href=${activityURL}>${formatDate(
+            activity.started_at
+          )}</a>
+                    </time>
+                  </div>
+                  <a href=${activityURL} class="title">${activityTitle}</a>
+
+                  ${
+                    activity.description
+                      ? `<p class="desc">${activity.description}</p>`
+                      : ""
+                  }
+
+                  <div class="activity-stats">
+                    ${stats
+                      .map((s) => {
+                        return `
+                          <div>
+                            <div class="stat-label">${s.label}</div>
+                            <div class="stat-value">${s.value}</div>
+                          </div>`;
+                      })
+                      .join("")}
+                  </div>
+                </div>
+              </header>
+              ${
+                activity.polyline
+                  ? `
+                  <a href="${activityURL}"><div class="activity-map" data-rkey="${
+                      activity.rkey
+                    }">${polylineToSVG(activity.polyline)}</div></a>
+                `
+                  : ""
+              }
+            </div>
+          </li>`;
+        })
+        .join("");
+    }
+
     getOwnerFullDisplayName(activity) {
       if (activity.owner_display_name && activity.owner_handle) {
         return `<b>${activity.owner_display_name}</b> @${activity.owner_handle}`;
@@ -146,69 +172,101 @@
       return activity.did;
     }
 
-    /**
-     * Determine if the user viewing an activity is the owner of it.
-     * TODO: Use this to provide edit/delete controls
-     *
-     * @param {Object} activity - An activity object with a did field.
-     * @returns {boolean}
-     */
     viewerIsOwner(activity) {
       return this.viewerDid && activity.did === this.viewerDid;
     }
 
-    /**
-     * Render a maplibre map for each activity that has a polyline.
-     * Looks up activities by rkey to match each .activity-map element
-     * to its route data.
-     *
-     * @param {Array<Object>} data - Array of activity objects, each
-     *   optionally containing rkey and polyline fields.
-     */
-    initMaps(data) {
-      const activitiesByRkey = Object.fromEntries(data.map((a) => [a.rkey, a]));
+    initMaps() {
+      const polylines = this.polylines;
+      const MAX_CONCURRENT = 3;
+      const queue = [];
+      let active = 0;
 
-      this.querySelectorAll(".activity-map").forEach((el) => {
-        const activity = activitiesByRkey[el.dataset.rkey];
-        if (!activity?.polyline) return;
+      function processQueue() {
+        while (active < MAX_CONCURRENT && queue.length > 0) {
+          const el = queue.shift();
+          if (el.dataset.captured) continue;
+          active++;
+          renderMap(el).then(() => {
+            active--;
+            processQueue();
+          });
+        }
+      }
 
-        const coords = decodePolyline(activity.polyline);
-        if (coords.length === 0) return;
+      function renderMap(el) {
+        return new Promise((resolve) => {
+          const encoded = polylines.get(el.dataset.rkey);
+          if (!encoded) {
+            resolve();
+            return;
+          }
+          const coords = decodePolyline(encoded);
+          if (coords.length < 2) {
+            resolve();
+            return;
+          }
 
-        const bounds = coords.reduce(
-          (b, coord) => b.extend(coord),
-          new maplibregl.LngLatBounds(coords[0], coords[0])
-        );
+          const bounds = coords.reduce(
+            (b, coord) => b.extend(coord),
+            new maplibregl.LngLatBounds(coords[0], coords[0])
+          );
 
-        const map = new maplibregl.Map({
-          container: el,
-          style: "https://tiles.openfreemap.org/styles/positron",
-          bounds: bounds,
-          fitBoundsOptions: { padding: 40 },
-        });
+          const map = new maplibregl.Map({
+            container: el,
+            style: "https://tiles.openfreemap.org/styles/positron",
+            bounds: bounds,
+            fitBoundsOptions: { padding: 40 },
+            interactive: false,
+            attributionControl: false,
+          });
 
-        map.on("load", () => {
-          map.addSource("route", {
-            type: "geojson",
-            data: {
-              type: "Feature",
-              geometry: {
-                type: "LineString",
-                coordinates: coords,
+          map.on("load", () => {
+            map.addSource("route", {
+              type: "geojson",
+              data: {
+                type: "Feature",
+                geometry: { type: "LineString", coordinates: coords },
               },
-            },
-          });
+            });
 
-          map.addLayer({
-            id: "route",
-            type: "line",
-            source: "route",
-            paint: {
-              "line-color": "#FFE866",
-              "line-width": 4,
-            },
+            map.addLayer({
+              id: "route",
+              type: "line",
+              source: "route",
+              paint: { "line-color": "#FFE866", "line-width": 4 },
+            });
+
+            map.once("idle", () => {
+              const img = new Image();
+              img.src = map.getCanvas().toDataURL();
+              img.style.cssText =
+                "width:100%;height:100%;object-fit:cover;display:block;";
+              map.remove();
+              el.innerHTML = "";
+              el.appendChild(img);
+              el.dataset.captured = "true";
+              resolve();
+            });
           });
         });
+      }
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting && !entry.target.dataset.captured) {
+              queue.push(entry.target);
+              observer.unobserve(entry.target);
+            }
+          }
+          processQueue();
+        },
+        { rootMargin: "200px" }
+      );
+
+      this.querySelectorAll(".activity-map[data-rkey]").forEach((el) => {
+        observer.observe(el);
       });
     }
   }
@@ -291,7 +349,7 @@ async function handleDelete(e) {
   .preview {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    row-gap: 1.25rem;
 
     &.hidden {
       display: none;
@@ -299,12 +357,11 @@ async function handleDelete(e) {
     }
 
     > div {
-      background: var(--color-foreground);
+      background: color-mix(in srgb, var(--color-foreground) 2%, transparent);
+      border: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
       border-radius: 20px;
-      height: 280px;
-      opacity: 0.04;
+      height: 432px;
       overflow: hidden;
-      padding: 0.25rem;
       width: 100%;
 
       &::before {
@@ -312,8 +369,7 @@ async function handleDelete(e) {
         border-radius: 16px 16px 0 0;
         content: "";
         display: block;
-        opacity: 0.75;
-        height: 60%;
+        height: 31%;
         width: 100%;
       }
     }
@@ -444,6 +500,8 @@ async function handleDelete(e) {
   }
 
   .activity-map {
+    background: color-mix(in srgb, var(--color-foreground) 2%, transparent);
+    color: var(--color-accent-primary);
     height: 300px;
   }
 </style>

@@ -1,7 +1,14 @@
+import logging
+from pathlib import Path
+
 import psycopg
 from psycopg.rows import dict_row
 
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
+
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
 def get_connection():
@@ -12,99 +19,36 @@ def init_db():
     with get_connection() as conn:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS activities (
-                did TEXT NOT NULL,
-                rkey TEXT NOT NULL,
-                sport_type TEXT NOT NULL,
-                title TEXT,
-                description TEXT,
-                started_at TIMESTAMPTZ NOT NULL,
-                elapsed_time INTEGER NOT NULL,
-                moving_time INTEGER NOT NULL,
-                distance TEXT NOT NULL,
-                elevation_gain TEXT,
-                avg_speed TEXT,
-                max_speed TEXT,
-                avg_heart_rate INTEGER,
-                max_heart_rate INTEGER,
-                avg_cadence INTEGER,
-                max_cadence INTEGER,
-                avg_power INTEGER,
-                max_power INTEGER,
-                calories INTEGER,
-                polyline TEXT,
-                device TEXT,
-                source TEXT,
-                created_at TIMESTAMPTZ NOT NULL,
-                indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (did, rkey)
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                filename TEXT PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """
         )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_activities_started_at
-                ON activities (started_at DESC)
-        """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_activities_did
-                ON activities (did)
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cursor (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                cursor_value BIGINT NOT NULL
+        conn.commit()
+
+        applied = {
+            row["filename"]
+            for row in conn.execute(
+                "SELECT filename FROM schema_migrations"
+            ).fetchall()
+        }
+
+        migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+
+        for migration_file in migration_files:
+            if migration_file.name in applied:
+                continue
+
+            log.info("Applying migration: %s", migration_file.name)
+            sql = migration_file.read_text()
+            conn.execute(sql)
+            conn.execute(
+                "INSERT INTO schema_migrations (filename) VALUES (%s)",
+                (migration_file.name,),
             )
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS oauth_auth_requests (
-                state TEXT PRIMARY KEY,
-                authserver_iss TEXT NOT NULL,
-                did TEXT,
-                handle TEXT,
-                pds_url TEXT,
-                pkce_verifier TEXT NOT NULL,
-                scope TEXT NOT NULL,
-                dpop_authserver_nonce TEXT NOT NULL,
-                dpop_private_jwk TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS profiles (
-                did TEXT PRIMARY KEY,
-                handle TEXT NOT NULL,
-                display_name TEXT,
-                description TEXT,
-                avatar_url TEXT,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS oauth_sessions (
-                did TEXT PRIMARY KEY,
-                handle TEXT NOT NULL,
-                pds_url TEXT NOT NULL,
-                authserver_iss TEXT NOT NULL,
-                access_token TEXT NOT NULL,
-                refresh_token TEXT NOT NULL,
-                dpop_authserver_nonce TEXT NOT NULL,
-                dpop_pds_nonce TEXT,
-                dpop_private_jwk TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """
-        )
+            conn.commit()
+            log.info("Applied migration: %s", migration_file.name)
 
 
 def upsert_activity(conn, did, rkey, record):
@@ -113,13 +57,16 @@ def upsert_activity(conn, did, rkey, record):
         INSERT INTO activities (
             did, rkey, sport_type, title, description, started_at,
             elapsed_time, moving_time, distance, elevation_gain,
-            avg_speed, max_speed, avg_heart_rate, max_heart_rate,
+            elevation_loss, avg_speed, max_speed,
+            avg_heart_rate, max_heart_rate,
             avg_cadence, max_cadence, avg_power, max_power,
-            calories, polyline, device, source, created_at
+            calories, total_work, weighted_avg_power,
+            perceived_exertion,
+            polyline, device, source, source_id, weather, created_at
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (did, rkey) DO UPDATE SET
             sport_type = EXCLUDED.sport_type,
@@ -130,6 +77,7 @@ def upsert_activity(conn, did, rkey, record):
             moving_time = EXCLUDED.moving_time,
             distance = EXCLUDED.distance,
             elevation_gain = EXCLUDED.elevation_gain,
+            elevation_loss = EXCLUDED.elevation_loss,
             avg_speed = EXCLUDED.avg_speed,
             max_speed = EXCLUDED.max_speed,
             avg_heart_rate = EXCLUDED.avg_heart_rate,
@@ -139,9 +87,14 @@ def upsert_activity(conn, did, rkey, record):
             avg_power = EXCLUDED.avg_power,
             max_power = EXCLUDED.max_power,
             calories = EXCLUDED.calories,
+            total_work = EXCLUDED.total_work,
+            weighted_avg_power = EXCLUDED.weighted_avg_power,
+            perceived_exertion = EXCLUDED.perceived_exertion,
             polyline = EXCLUDED.polyline,
             device = EXCLUDED.device,
             source = EXCLUDED.source,
+            source_id = EXCLUDED.source_id,
+            weather = EXCLUDED.weather,
             created_at = EXCLUDED.created_at,
             indexed_at = NOW()
     """,
@@ -156,6 +109,7 @@ def upsert_activity(conn, did, rkey, record):
             record["movingTime"],
             record["distance"],
             record.get("elevationGain"),
+            record.get("elevationLoss"),
             record.get("avgSpeed"),
             record.get("maxSpeed"),
             record.get("avgHeartRate"),
@@ -165,9 +119,14 @@ def upsert_activity(conn, did, rkey, record):
             record.get("avgPower"),
             record.get("maxPower"),
             record.get("calories"),
+            record.get("totalWork"),
+            record.get("weightedAvgPower"),
+            record.get("perceivedExertion"),
             record.get("polyline"),
             record.get("device"),
             record.get("source"),
+            record.get("sourceId"),
+            psycopg.types.json.Json(record["weather"]) if record.get("weather") else None,
             record["createdAt"],
         ),
     )
@@ -388,6 +347,83 @@ def has_profile(conn, did):
     return row is not None
 
 
+def fetch_activities_in_range(conn, did, min_started_at, max_started_at, padding_seconds=120):
+    """Fetch a user's existing activities within a time range (plus padding).
+
+    Returns a list of dicts suitable for passing to find_duplicates_in_list().
+    One query covers the entire import, no matter how many activities.
+    """
+    return conn.execute(
+        """
+        SELECT did, rkey, sport_type, started_at, distance, elapsed_time
+        FROM activities
+        WHERE did = %s
+          AND started_at BETWEEN %s::timestamptz - make_interval(secs => %s)
+                             AND %s::timestamptz + make_interval(secs => %s)
+        """,
+        (did, min_started_at, padding_seconds, max_started_at, padding_seconds),
+    ).fetchall()
+
+
+def find_duplicates_in_list(needle, candidates, time_window=60,
+                            distance_tolerance=0.01, elapsed_tolerance=60):
+    """Check a list of candidate activities against a single activity for duplicates.
+
+    Pure logic, no database. Both needle and candidates use snake_case keys:
+    sport_type, started_at (ISO string or datetime), distance (string or float),
+    elapsed_time (int).
+
+    Returns the list of candidates that match all criteria.
+    """
+    from datetime import datetime as dt
+
+    def to_datetime(val):
+        if isinstance(val, dt):
+            return val
+        if isinstance(val, str):
+            s = val.strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            return dt.fromisoformat(s)
+        return None
+
+    def to_float(val):
+        if val is None:
+            return 0.0
+        return float(val)
+
+    needle_time = to_datetime(needle["started_at"])
+    needle_dist = to_float(needle["distance"])
+    needle_elapsed = int(needle["elapsed_time"]) if needle["elapsed_time"] else 0
+
+    matches = []
+    for candidate in candidates:
+        if candidate["sport_type"] != needle["sport_type"]:
+            continue
+
+        cand_time = to_datetime(candidate["started_at"])
+        if needle_time and cand_time:
+            if abs((needle_time - cand_time).total_seconds()) > time_window:
+                continue
+        else:
+            continue
+
+        cand_dist = to_float(candidate["distance"])
+        if needle_dist > 0 and cand_dist > 0:
+            if abs(needle_dist - cand_dist) / max(needle_dist, cand_dist) > distance_tolerance:
+                continue
+        elif needle_dist != cand_dist:
+            continue
+
+        cand_elapsed = int(candidate["elapsed_time"]) if candidate["elapsed_time"] else 0
+        if abs(needle_elapsed - cand_elapsed) > elapsed_tolerance:
+            continue
+
+        matches.append(candidate)
+
+    return matches
+
+
 def get_activity(conn, did, rkey):
     return conn.execute(
         """
@@ -401,3 +437,141 @@ def get_activity(conn, did, rkey):
         """,
         (did, rkey),
     ).fetchone()
+
+
+# Import job helpers
+
+
+def create_import_job(conn, job_id, did, source):
+    conn.execute(
+        """
+        INSERT INTO import_jobs (id, did, source, status)
+        VALUES (%s, %s, %s, 'processing')
+    """,
+        (job_id, did, source),
+    )
+    conn.commit()
+
+
+def set_import_job_manifest(conn, job_id, manifest, total, duplicates=0):
+    conn.execute(
+        """
+        UPDATE import_jobs
+        SET manifest = %s, total = %s, duplicates = %s, status = 'preview'
+        WHERE id = %s
+    """,
+        (psycopg.types.json.Json(manifest), total, duplicates, job_id),
+    )
+    conn.commit()
+
+
+def update_import_job_manifest(conn, job_id, manifest):
+    conn.execute(
+        "UPDATE import_jobs SET manifest = %s WHERE id = %s",
+        (psycopg.types.json.Json(manifest), job_id),
+    )
+    conn.commit()
+
+
+def get_import_job_for_user(conn, job_id, did):
+    return conn.execute(
+        "SELECT * FROM import_jobs WHERE id = %s AND did = %s", (job_id, did)
+    ).fetchone()
+
+
+def update_import_job_status(conn, job_id, status):
+    conn.execute(
+        "UPDATE import_jobs SET status = %s WHERE id = %s",
+        (status, job_id),
+    )
+    conn.commit()
+
+
+def update_import_job_progress(conn, job_id, imported, skipped, failed, errors=None):
+    if errors is not None:
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET imported = %s, skipped = %s, failed = %s, errors = %s
+            WHERE id = %s
+        """,
+            (imported, skipped, failed, psycopg.types.json.Json(errors), job_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET imported = %s, skipped = %s, failed = %s
+            WHERE id = %s
+        """,
+            (imported, skipped, failed, job_id),
+        )
+    conn.commit()
+
+
+def complete_import_job(conn, job_id, status="completed"):
+    conn.execute(
+        "UPDATE import_jobs SET status = %s, completed_at = NOW() WHERE id = %s",
+        (status, job_id),
+    )
+    conn.commit()
+
+
+def reset_import_job_to_preview(conn, job_id):
+    """Reset a completed/reverting job back to preview state.
+
+    Zeros counters, clears completed_at, and strips rkey/did/imported
+    from each manifest item.
+    """
+    row = conn.execute(
+        "SELECT manifest FROM import_jobs WHERE id = %s", (job_id,)
+    ).fetchone()
+
+    if row and row["manifest"]:
+        cleaned = []
+        for item in row["manifest"]:
+            item.pop("rkey", None)
+            item.pop("did", None)
+            item.pop("imported", None)
+            cleaned.append(item)
+
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET status = 'preview', imported = 0, skipped = 0, failed = 0,
+                errors = '[]', completed_at = NULL, manifest = %s
+            WHERE id = %s
+        """,
+            (psycopg.types.json.Json(cleaned), job_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE import_jobs
+            SET status = 'preview', imported = 0, skipped = 0, failed = 0,
+                errors = '[]', completed_at = NULL
+            WHERE id = %s
+        """,
+            (job_id,),
+        )
+
+    conn.commit()
+
+
+def delete_import_job(conn, job_id):
+    conn.execute("DELETE FROM import_jobs WHERE id = %s", (job_id,))
+    conn.commit()
+
+
+def list_import_jobs_for_user(conn, did, limit=10):
+    return conn.execute(
+        """
+        SELECT id, did, source, status, total, duplicates, imported, skipped,
+               failed, errors, created_at, completed_at
+        FROM import_jobs
+        WHERE did = %s
+        ORDER BY created_at DESC
+        LIMIT %s
+    """,
+        (did, limit),
+    ).fetchall()

@@ -191,6 +191,7 @@
     }
   }
 
+  /* FIXME: This can use some/all of the global btn class */
   .btn {
     align-items: center;
     appearance: none;

@@ -1,0 +1,24 @@
+---
+layout: layout.webc
+title: Add Activities - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <h2>Upload</h2>
+      <p>Create activities from common file formats.</p>
+    </header>
+    <activity-upload-form></activity-upload-form>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+</style>

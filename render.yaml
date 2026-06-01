@@ -58,6 +58,9 @@ projects:
                 value: https://api.thedistance.app
             routes:
               - type: rewrite
+                source: /account/imports/*
+                destination: /account/imports/job/index.html
+              - type: rewrite
                 source: /profile/*/activity/*
                 destination: /profile/activity/index.html
               - type: rewrite

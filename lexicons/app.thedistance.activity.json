@@ -60,6 +60,11 @@
             "description": "Total elevation gain in meters. String-encoded decimal number.",
             "maxLength": 64
           },
+          "elevationLoss": {
+            "type": "string",
+            "description": "Total elevation loss in meters. String-encoded decimal number.",
+            "maxLength": 64
+          },
           "avgSpeed": {
             "type": "string",
             "description": "Average speed in meters per second. String-encoded decimal number.",
@@ -105,6 +110,26 @@
             "description": "Estimated calories burned.",
             "minimum": 0
           },
+          "totalWork": {
+            "type": "integer",
+            "description": "Total mechanical work in kilojoules.",
+            "minimum": 0
+          },
+          "weightedAvgPower": {
+            "type": "integer",
+            "description": "Normalized/weighted average power in watts.",
+            "minimum": 0
+          },
+          "perceivedExertion": {
+            "type": "integer",
+            "description": "Rate of perceived exertion (RPE), typically 1-10.",
+            "minimum": 0
+          },
+          "weather": {
+            "type": "ref",
+            "ref": "#weather",
+            "description": "Weather conditions during the activity."
+          },
           "polyline": {
             "type": "string",
             "description": "Encoded polyline string representing a simplified, privacy-trimmed route for map display. Uses Google's encoded polyline algorithm format. Ingestion services should simplify polylines to fit within the 20,000 byte limit. This limit may be revisited if it proves insufficient.",
@@ -121,11 +146,107 @@
             "maxLength": 128,
             "knownValues": ["garmin", "strava", "wahoo", "manual", "fit-file", "gpx-file"]
           },
+          "sourceId": {
+            "type": "string",
+            "description": "Identifier for this activity in the source system, e.g. a Strava activity ID.",
+            "maxLength": 256
+          },
           "createdAt": {
             "type": "string",
             "format": "datetime",
             "description": "Timestamp of when this record was created."
           }
+        }
+      }
+    },
+    "weather": {
+      "type": "object",
+      "description": "Weather conditions observed during the activity.",
+      "properties": {
+        "condition": {
+          "type": "string",
+          "description": "General weather condition, e.g. 'Clear', 'Cloudy', 'Rain'.",
+          "maxLength": 128
+        },
+        "temperature": {
+          "type": "string",
+          "description": "Air temperature in degrees Celsius. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "apparentTemperature": {
+          "type": "string",
+          "description": "Feels-like temperature in degrees Celsius. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "dewpoint": {
+          "type": "string",
+          "description": "Dewpoint in degrees Celsius. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "humidity": {
+          "type": "string",
+          "description": "Relative humidity as a percentage. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "pressure": {
+          "type": "string",
+          "description": "Atmospheric pressure in hPa/mbar. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "windSpeed": {
+          "type": "string",
+          "description": "Wind speed in meters per second. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "windGust": {
+          "type": "string",
+          "description": "Wind gust speed in meters per second. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "windBearing": {
+          "type": "string",
+          "description": "Wind direction in degrees (0-360). String-encoded decimal.",
+          "maxLength": 64
+        },
+        "precipitationIntensity": {
+          "type": "string",
+          "description": "Precipitation intensity in mm/hr. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "precipitationProbability": {
+          "type": "string",
+          "description": "Precipitation probability as a percentage. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "precipitationType": {
+          "type": "string",
+          "description": "Type of precipitation, e.g. 'rain', 'snow', 'sleet'.",
+          "maxLength": 64
+        },
+        "cloudCover": {
+          "type": "string",
+          "description": "Cloud cover as a percentage. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Visibility distance in kilometers. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "avgTemperature": {
+          "type": "string",
+          "description": "Average device-measured temperature in degrees Celsius. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "maxTemperature": {
+          "type": "string",
+          "description": "Maximum device-measured temperature in degrees Celsius. String-encoded decimal.",
+          "maxLength": 64
+        },
+        "uvIndex": {
+          "type": "string",
+          "description": "UV index. String-encoded decimal.",
+          "maxLength": 64
         }
       }
     },

@@ -1,0 +1,25 @@
+---
+layout: layout.webc
+title: Account - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <account-nav></account-nav>
+      <h2>Account</h2>
+    </header>
+
+    <div>Account content</div>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    row-gap: 3rem;
+  }
+</style>

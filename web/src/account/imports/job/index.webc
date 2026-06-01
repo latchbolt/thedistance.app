@@ -1,0 +1,760 @@
+---
+layout: layout.webc
+title: Import - The Distance
+---
+
+<div class="g-max-centered">
+  <div class="contents">
+    <header>
+      <header-back-btn
+        href="/account/imports/"
+        text="Imports"
+      ></header-back-btn>
+      <h2>Import</h2>
+    </header>
+    <div id="job-summary" class="job-summary"></div>
+    <div id="job-controls" class="job-controls"></div>
+    <div id="activities" class="activities">
+      <div class="import-header">
+        <div class="activity-header-row">
+          <div>&nbsp;</div>
+          <div class="activity-title">Title</div>
+          <div class="activity-time">Date</div>
+          <div>Moving Time</div>
+          <div>Distance</div>
+          <div>Elev Gain</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style webc:scoped>
+  .contents {
+    column-gap: var(--grid-gutter);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+  }
+
+  .import-meta {
+    align-items: center;
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .job-summary {
+    font-size: var(--font-size-1_5);
+    max-width: var(--grid-max-5);
+    padding-top: 1rem;
+  }
+
+  .job-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+
+    .btn-secondary {
+      font-size: var(--font-size-0_75);
+    }
+
+    .delete-job-btn,
+    .revert-job-btn {
+      --color-active: var(--color-accent-error);
+      anchor-name: --destructive-confirm;
+    }
+  }
+
+  .confirm-popover {
+    background-color: var(--color-background);
+    border: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
+    border-radius: 8px;
+    max-width: 320px;
+    opacity: 1;
+    padding: 1rem;
+    position-anchor: --destructive-confirm;
+    position-area: bottom span-right;
+    top: 0.25rem;
+    transform: translateY(0);
+    transition: 0.15s ease;
+
+    &:popover-open {
+      @starting-style {
+        opacity: 0;
+        transform: translateY(-1rem);
+      }
+    }
+
+    p {
+      font-size: var(--font-size-0_75);
+      line-height: 1.3;
+    }
+
+    .confirm-actions {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      padding-top: 1rem;
+    }
+
+    .confirm-delete-btn,
+    .confirm-revert-btn {
+      --color-active: var(--color-accent-error);
+    }
+  }
+
+  .activities {
+    --b: 1px dotted color-mix(in srgb, currentColor 20%, transparent);
+    --r: 20px;
+    margin-top: 3rem;
+    opacity: 1;
+  }
+
+  .activities ul {
+    background: var(--color-background);
+    border-left: var(--b);
+    border-right: var(--b);
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .import-footer {
+    background-color: var(--color-background);
+    bottom: 0;
+    padding-bottom: 1.5rem;
+    position: sticky;
+
+    .inner {
+      border-radius: 0 0 var(--r) var(--r);
+      border: var(--b);
+      padding: 0.75rem;
+    }
+  }
+
+  .import-header {
+    background-color: var(--color-background);
+    opacity: 1;
+    position: sticky;
+    padding-top: 0.5rem;
+    top: 0;
+  }
+
+  [data-status="processing"],
+  [data-status="reverting"] {
+    .import-header,
+    ul {
+      opacity: 0.5;
+    }
+  }
+
+  [data-status="processing"]:not(:has(ul)) {
+    .import-header {
+      display: none;
+    }
+  }
+
+  [data-status="failed"] {
+    & > * {
+      display: none;
+    }
+  }
+
+  .activity-header-row {
+    border: var(--b);
+    border-radius: var(--r) var(--r) 0 0;
+    display: flex;
+    flex: 1;
+    font-size: var(--font-size-0_75);
+
+    & > * {
+      padding: 0.5rem;
+      flex: 1;
+      text-align: right;
+    }
+
+    & > div:first-child {
+      flex: 0;
+    }
+
+    .activity-title {
+      padding-left: 1.25rem;
+      text-align: left;
+    }
+  }
+
+  [data-status="completed"] {
+    ul {
+      border-bottom: var(--b);
+      border-radius: 0 0 var(--r) var(--r);
+      padding-bottom: 1.5rem;
+    }
+
+    .activity-header-row {
+      & > div:first-child {
+        display: none;
+      }
+
+      .activity-title {
+        padding-left: 0.5rem;
+      }
+    }
+  }
+
+  .activity-row {
+    border-bottom: var(--b);
+    font-size: var(--font-size-0_75);
+    line-height: 1;
+    list-style: none;
+
+    &:last-child:not(.completed-row) {
+      border-bottom: 0;
+    }
+
+    label {
+      cursor: pointer;
+      display: flex;
+
+      &:hover {
+        background-color: color-mix(
+          in srgb,
+          var(--color-accent-foreground) 8%,
+          transparent
+        );
+      }
+
+      &:not(:has(input:checked)) .activity-contents > * {
+        color: color-mix(in srgb, currentColor 30%, transparent);
+      }
+    }
+
+    .input-container {
+      border-right: var(--b);
+      padding: 0.5rem;
+      padding-top: 0.6rem;
+    }
+  }
+
+  .activity-title,
+  .activity-time {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .activity-title {
+    text-align: left;
+    width: 25ch;
+  }
+
+  .activity-time {
+    max-width: 18ch;
+  }
+
+  .activity-contents {
+    display: flex;
+    flex: 1;
+    text-align: right;
+
+    & > * {
+      padding: 0.5rem;
+      flex: 1;
+    }
+  }
+</style>
+
+<script webc:bucket="components">
+  const jobPathMatch = window.location.pathname.match(
+    /\/account\/imports\/([^/]+)/
+  );
+  const jobId = jobPathMatch ? jobPathMatch[1] : null;
+  const selected = new Set();
+  let authedUser = null;
+
+  if (jobId) {
+    document.addEventListener("afterAuthCheck", async (e) => {
+      if (!e.detail.user) {
+        window.location.href = "/login";
+        return;
+      }
+
+      authedUser = e.detail.user;
+
+      const header = document.querySelector(".contents header");
+
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/import/jobs/${encodeURIComponent(jobId)}`,
+          FETCH_OPTS
+        );
+
+        if (!res.ok) {
+          header.insertAdjacentHTML("beforeend", "<p>Import not found</p>");
+          return;
+        }
+
+        const job = await res.json();
+        header.querySelector("h2").innerHTML = `${capitalize(
+          job.source
+        )} Import`;
+
+        header.insertAdjacentHTML(
+          "beforeend",
+          `<div class="import-meta"><span class="job-status ${job.status}">${
+            job.status
+          }</span><time datetime="${job.created_at}">${formatDate(
+            job.created_at
+          )}</time></div>`
+        );
+
+        document.getElementById("activities").dataset.status = job.status;
+
+        if (job.status === "processing") {
+          const summary = document.getElementById("job-summary");
+          summary.innerHTML = `<p>Processing ${capitalize(
+            job.source
+          )} import. This shouldn’t take more than 30 seconds, but if you have large archive, could take up a minute.</p>`;
+
+          subscribeToEvents();
+        } else if (job.status === "preview") {
+          showManifest({
+            activities: job.manifest,
+            total: job.total,
+            duplicates: job.duplicates,
+          });
+        } else if (job.status === "completed") {
+          showCompleted(job);
+        } else if (job.status === "reverting") {
+          const summary = document.getElementById("job-summary");
+          summary.innerHTML = `<p>Reverting import…</p>`;
+          subscribeToEvents();
+        } else if (job.status === "failed") {
+          showFailed();
+        }
+      } catch (err) {
+        header.insertAdjacentHTML("beforeend", "<p>Error loading import</p>");
+        console.warn(err);
+      }
+    });
+  }
+
+  function renderControls(status) {
+    const controls = document.getElementById("job-controls");
+    const buttons = [];
+
+    const deleteBtn = `<button type="button" class="delete-job-btn btn-secondary" popovertarget="confirm-delete">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7l16 0" />
+        <path d="M10 11l0 6" />
+        <path d="M14 11l0 6" />
+        <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" />
+        <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />
+      </svg>
+      Delete Import…
+    </button>
+    <div popover id="confirm-delete" class="confirm-popover">
+      <p>This will permanently delete this import. Any previously imported Activities will not be affected.</p>
+      <div class="confirm-actions">
+        <button type="button" class="btn-secondary" popovertarget="confirm-delete">Cancel</button>
+        <button type="button" class="btn-secondary btn-destructive confirm-delete-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7l16 0" />
+            <path d="M10 11l0 6" />
+            <path d="M14 11l0 6" />
+            <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" />
+            <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />
+          </svg>
+          Delete
+        </button>
+      </div>
+    </div>`;
+
+    const revertBtn = `<button type="button" class="revert-job-btn btn-secondary" popovertarget="confirm-revert">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 14l-4 -4l4 -4" />
+        <path d="M5 10h11a4 4 0 1 1 0 8h-1" />
+      </svg>
+      Revert Import…
+    </button>
+    <div popover id="confirm-revert" class="confirm-popover">
+      <p>This will delete all Activities created by this imported. The import will return to preview state where you can rerun it.</p>
+      <div class="confirm-actions">
+        <button type="button" class="btn-secondary" popovertarget="confirm-revert">Cancel</button>
+        <button type="button" class="btn-secondary btn-destructive confirm-revert-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 14l-4 -4l4 -4" />
+            <path d="M5 10h11a4 4 0 1 1 0 8h-1" />
+          </svg>
+          Revert
+        </button>
+      </div>
+    </div>`;
+
+    const recheckBtn = `<button type="button" class="recheck-job-btn btn-secondary">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667l0 -8.666" />
+        <path d="M4.012 16.737a2 2 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1" />
+        <path d="M11 14l2 2l4 -4" />
+      </svg>
+      Re-check Duplicates
+    </button>`;
+
+    if (status === "preview") {
+      buttons.push(deleteBtn);
+      buttons.push(recheckBtn);
+    } else if (status === "completed") {
+      buttons.push(revertBtn);
+    } else if (status === "failed") {
+      buttons.push(deleteBtn);
+    }
+
+    controls.innerHTML = buttons.join("");
+
+    controls
+      .querySelector(".recheck-job-btn")
+      ?.addEventListener("click", startRecheck);
+    controls
+      .querySelector(".confirm-delete-btn")
+      ?.addEventListener("click", deleteJob);
+    controls
+      .querySelector(".confirm-revert-btn")
+      ?.addEventListener("click", startRevert);
+  }
+
+  function showManifest(manifest) {
+    selected.clear();
+    manifest.activities.forEach((obj, idx) => {
+      if (!obj.duplicate) selected.add(idx);
+    });
+
+    const container = document.getElementById("job-summary");
+    let dupesMsg = "";
+
+    if (manifest.duplicates !== 0) {
+      dupesMsg = ` Of those, ${manifest.duplicates}`;
+
+      if (manifest.duplicates > 1) {
+        dupesMsg += " look like duplicates and were deselected. ";
+      } else {
+        dupesMsg += " looks like a duplicate and was deselected. ";
+      }
+    }
+
+    container.innerHTML = `<p><b>${manifest.total}</b> total Activities found.${dupesMsg}We’ll only import selected Activities.</p>`;
+
+    renderControls("preview");
+    renderActivities(manifest.activities);
+  }
+
+  function activityColumns(obj) {
+    const a = obj.activity;
+    const fmtDate = formatDate(a.started_at);
+    const title =
+      obj.rkey && authedUser
+        ? `<a href="/profile/${authedUser.handle}/activity/${obj.rkey}">${a.title}</a>`
+        : a.title;
+
+    return `
+      <p class="activity-title"><b>${title}</b></p>
+      <time class="activity-time" datetime="${
+        a.started_at
+      }" title="${fmtDate}">${fmtDate}</time>
+      <p>${formatDuration(a.moving_time)}</p>
+      <p>${a.distance !== "0" ? `${metersToMiles(a.distance)} mi` : "-"}</p>
+      <p>${
+        a.elevation_gain ? `${metersToFeet(a.elevation_gain)} ft` : "-"
+      }</p>`;
+  }
+
+  function renderActivities(activities) {
+    const container = document.getElementById("activities");
+    const oldList = container.querySelector("ul");
+    if (oldList) oldList.remove();
+    const oldFooter = container.querySelector(".import-footer");
+    if (oldFooter) oldFooter.remove();
+
+    const html = activities.reduce((str, obj, idx) => {
+      return (
+        str +
+        `
+        <li id="activity-${obj.activity_id}" class="activity-row">
+          <label>
+            <div class="input-container">
+              <input type="checkbox" data-index="${idx}" name="${
+          obj.activity_id
+        }" ${!obj.duplicate ? "checked" : ""} />
+            </div>
+            <div class="activity-contents">
+              ${activityColumns(obj)}
+            </div>
+          </label>
+        </li>`
+      );
+    }, "");
+
+    container.querySelector(".import-header").insertAdjacentHTML(
+      "afterend",
+      `<ul>${html}</ul>
+      <div class="import-footer">
+        <div class="inner">
+          <button type="button" class="btn import-btn">Import ${
+            selected.size
+          } ${pluralize(selected.size, "Activity", "Activities")}</button>
+        </div>
+      </div>`
+    );
+
+    container.querySelector("ul").addEventListener("change", (e) => {
+      const checkbox = e.target;
+      if (checkbox.type !== "checkbox") return;
+      const idx = parseInt(checkbox.dataset.index, 10);
+      if (checkbox.checked) {
+        selected.add(idx);
+      } else {
+        selected.delete(idx);
+      }
+      container.querySelector(".import-btn").textContent = `Import ${
+        selected.size
+      } ${pluralize(selected.size, "Activity", "Activities")}`;
+    });
+
+    container
+      .querySelector(".import-btn")
+      .addEventListener("click", startImport);
+  }
+
+  async function startImport() {
+    const container = document.getElementById("activities");
+    container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.disabled = true;
+    });
+
+    const btn = document.querySelector(".import-btn");
+    btn.disabled = true;
+    btn.textContent = "Importing…";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/import/strava/run`, {
+        ...FETCH_OPTS,
+        method: "POST",
+        headers: { ...FETCH_OPTS.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: jobId,
+          selected: [...selected],
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        btn.textContent = data.error || "Import failed";
+        btn.disabled = false;
+        return;
+      }
+
+      subscribeToEvents();
+    } catch (err) {
+      console.error(err);
+      btn.textContent = "Import failed";
+      btn.disabled = false;
+    }
+  }
+
+  async function startRecheck() {
+    const btn = document.querySelector(".recheck-job-btn");
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+    btn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 16a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+        <path d="M14 16a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+        <path d="M16.346 9.17l-.729 -1.261c-.16 -.248 -1.056 -.203 -1.117 .091l-.177 1.38" />
+        <path d="M19.761 14.813l-2.84 -5.133c-.189 -.31 -.592 -.68 -1.421 -.68c-.828 0 -1.5 .448 -1.5 1v6" />
+        <path d="M7.654 9.17l.729 -1.261c.16 -.249 1.056 -.203 1.117 .091l.177 1.38" />
+        <path d="M4.239 14.813l2.84 -5.133c.189 -.31 .592 -.68 1.421 -.68c.828 0 1.5 .448 1.5 1v6" />
+        <path d="M10 12h4v2h-4l0 -2" />
+      </svg>
+      Checking Duplicates…
+    `;
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/import/jobs/${encodeURIComponent(jobId)}/recheck`,
+        { ...FETCH_OPTS, method: "POST" }
+      );
+
+      if (!res.ok) {
+        const data = await res.json();
+        btn.textContent = data.error || "Re-check failed";
+        btn.disabled = false;
+        return;
+      }
+
+      subscribeToEvents();
+    } catch (err) {
+      console.error(err);
+      btn.textContent = "Re-check failed";
+      btn.disabled = false;
+    }
+  }
+
+  function showFailed() {
+    const summary = document.getElementById("job-summary");
+    summary.innerHTML = `<p>This import failed.</p>`;
+    renderControls("failed");
+  }
+
+  async function deleteJob() {
+    document.getElementById("confirm-delete").hidePopover();
+
+    const btn = document.querySelector(".delete-job-btn");
+    btn.disabled = true;
+    btn.textContent = "Deleting…";
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/import/jobs/${encodeURIComponent(jobId)}`,
+        { ...FETCH_OPTS, method: "DELETE" }
+      );
+
+      if (!res.ok) {
+        const data = await res.json();
+        btn.textContent = data.error || "Delete failed";
+        btn.disabled = false;
+        return;
+      }
+
+      window.location.href = "/account/imports/";
+    } catch (err) {
+      console.error(err);
+      btn.textContent = "Delete failed";
+      btn.disabled = false;
+    }
+  }
+
+  function showCompleted(job) {
+    const summary = document.getElementById("job-summary");
+    const parts = [`<b>${job.imported}</b> Activities imported`];
+    if (job.skipped > 0) parts.push(`<b>${job.skipped}</b> skipped`);
+    if (job.failed > 0) parts.push(`<b>${job.failed}</b> failed`);
+    const profileLink = authedUser
+      ? ` <a href="/profile/${authedUser.handle}">See them on your profile</a>.`
+      : "";
+    summary.innerHTML = `<p>${parts.join(", ")}. ${profileLink}</p>`;
+
+    const footer = document.querySelector(".import-footer");
+    if (footer) footer.remove();
+
+    renderControls("completed");
+
+    if (job.manifest) {
+      renderCompletedActivities(job.manifest.filter((obj) => obj.imported));
+    }
+  }
+
+  async function startRevert() {
+    document.getElementById("confirm-revert").hidePopover();
+
+    const btn = document.querySelector(".revert-job-btn");
+    btn.disabled = true;
+    btn.textContent = "Reverting…";
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/import/jobs/${encodeURIComponent(jobId)}/revert`,
+        { ...FETCH_OPTS, method: "POST" }
+      );
+
+      if (!res.ok) {
+        const data = await res.json();
+        btn.textContent = data.error || "Revert failed";
+        btn.disabled = false;
+        return;
+      }
+
+      subscribeToEvents();
+    } catch (err) {
+      console.error(err);
+      btn.textContent = "Revert failed";
+      btn.disabled = false;
+    }
+  }
+
+  function renderCompletedActivities(activities) {
+    const html = activities.reduce((str, obj) => {
+      return (
+        str +
+        `
+        <li class="activity-row completed-row">
+          <div class="activity-contents">
+            ${activityColumns(obj)}
+          </div>
+        </li>`
+      );
+    }, "");
+
+    const container = document.getElementById("activities");
+    const oldList = container.querySelector("ul");
+    if (oldList) oldList.remove();
+    container
+      .querySelector(".import-header")
+      .insertAdjacentHTML("afterend", `<ul>${html}</ul>`);
+  }
+
+  function subscribeToEvents() {
+    const source = new EventSource(
+      `${API_BASE}/api/import/jobs/${encodeURIComponent(jobId)}/events`,
+      { withCredentials: true }
+    );
+
+    source.addEventListener("status", (e) => {
+      const { status } = JSON.parse(e.data);
+      document.getElementById("activities").dataset.status = status;
+      const el = document.querySelector(".job-status");
+      if (el) {
+        el.className = `job-status ${status}`;
+        el.textContent = status;
+      }
+    });
+
+    source.addEventListener("progress", (e) => {
+      const data = JSON.parse(e.data);
+      const summary = document.getElementById("job-summary");
+
+      if ("deleted" in data) {
+        const done = data.deleted + data.skipped;
+        summary.innerHTML = `<p>Reverting ${done} of ${data.total}…</p>`;
+      } else {
+        const done = data.imported + data.skipped + data.failed;
+        summary.innerHTML = `<p>Importing ${done} of ${data.total}…</p>`;
+      }
+    });
+
+    source.addEventListener("manifest", (e) => {
+      showManifest(JSON.parse(e.data));
+      source.close();
+    });
+
+    source.addEventListener("completed", (e) => {
+      const data = JSON.parse(e.data);
+      showCompleted(data);
+      source.close();
+    });
+
+    source.addEventListener("failed", (e) => {
+      const { errors } = JSON.parse(e.data);
+      console.error("Import failed:", errors);
+
+      const el = document.querySelector(".job-status");
+      if (el) {
+        el.className = "job-status failed";
+        el.textContent = "failed";
+      }
+
+      source.close();
+    });
+
+    source.addEventListener("error", () => {
+      source.close();
+    });
+  }
+</script>

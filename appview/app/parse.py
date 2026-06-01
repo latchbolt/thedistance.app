@@ -1,3 +1,4 @@
+import gzip
 import logging
 import math
 import xml.etree.ElementTree as ET
@@ -18,7 +19,11 @@ def parse_file(filename: str, data: bytes) -> dict:
     """
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    if ext == "fit":
+    if ext == "gz":
+        inner_name = filename[:-3]
+        data = gzip.decompress(data)
+        return parse_file(inner_name, data)
+    elif ext == "fit":
         return parse_fit(data)
     elif ext == "gpx":
         return parse_gpx(data)
@@ -318,6 +323,27 @@ def _normalize_sport_type(sport_type: str | None) -> str:
 
     synonyms = {
         "biking": "cycling",
+        "ride": "cycling",
+        "virtualride": "cycling",
+        "ebikeride": "cycling",
+        "e-bike_ride": "cycling",
+        "mountainbikeride": "cycling",
+        "mountain_bike_ride": "cycling",
+        "gravelride": "cycling",
+        "gravel_ride": "cycling",
+        "run": "running",
+        "virtualrun": "running",
+        "trailrun": "running",
+        "trail_run": "running",
+        "walk": "walking",
+        "hike": "hiking",
+        "swim": "swimming",
+        "workout": "workout",
+        "weighttraining": "weight_training",
+        "weight_training": "weight_training",
+        "yoga": "yoga",
+        "rock_climbing": "rock_climbing",
+        "rockclimbing": "rock_climbing",
     }
 
     return synonyms.get(normalized, normalized)
