@@ -311,9 +311,7 @@ title: Import - The Distance
 
         if (job.status === "processing") {
           const summary = document.getElementById("job-summary");
-          summary.innerHTML = `<p>Processing ${capitalize(
-            job.source
-          )} import. This shouldn’t take more than 30 seconds, but if you have large archive, could take up a minute.</p>`;
+          summary.innerHTML = `<p>Processing import. This may take a few minutes depending on the size of your archive.</p>`;
 
           subscribeToEvents();
         } else if (job.status === "preview") {
@@ -533,6 +531,9 @@ title: Import - The Distance
     btn.disabled = true;
     btn.textContent = "Importing…";
 
+    const controlBtns = document.querySelectorAll(".job-controls button");
+    controlBtns.forEach((b) => { b.disabled = true; });
+
     try {
       const res = await fetch(`${API_BASE}/api/import/strava/run`, {
         ...FETCH_OPTS,
@@ -548,6 +549,7 @@ title: Import - The Distance
         const data = await res.json();
         btn.textContent = data.error || "Import failed";
         btn.disabled = false;
+        controlBtns.forEach((b) => { b.disabled = false; });
         return;
       }
 
@@ -556,6 +558,7 @@ title: Import - The Distance
       console.error(err);
       btn.textContent = "Import failed";
       btn.disabled = false;
+      controlBtns.forEach((b) => { b.disabled = false; });
     }
   }
 

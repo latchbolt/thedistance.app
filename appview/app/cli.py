@@ -35,7 +35,7 @@ def backfill():
 
     identifier = sys.argv[1]
     result = _backfill(identifier)
-    print(f"Backfilled {result['records']} records for {result['did']}")
+    print(f"Backfilled {result['records']} records for {result['did']}, {result['deleted']} orphaned deleted")
 
 
 def generate_jwk():

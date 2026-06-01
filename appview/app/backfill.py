@@ -2,7 +2,7 @@ import logging
 
 import httpx
 
-from app.db import get_connection, has_profile, upsert_activity, upsert_profile
+from app.db import delete_activity, get_connection, get_rkeys_for_did, has_profile, upsert_activity, upsert_profile
 from app.identity import fetch_profile, resolve_identity
 
 log = logging.getLogger(__name__)
@@ -42,11 +42,20 @@ def backfill(identifier):
 
         conn = get_connection()
         count = 0
+        pds_rkeys = set()
+        orphaned = set()
         try:
             for rkey, record in list_records(client, pds, did):
+                pds_rkeys.add(rkey)
                 upsert_activity(conn, did, rkey, record)
                 count += 1
                 log.info("Backfilled %s/%s", did, rkey)
+
+            local_rkeys = get_rkeys_for_did(conn, did)
+            orphaned = local_rkeys - pds_rkeys
+            for rkey in orphaned:
+                delete_activity(conn, did, rkey)
+                log.info("Deleted orphaned %s/%s", did, rkey)
 
             if not has_profile(conn, did):
                 profile = fetch_profile(client, did, pds)
@@ -63,5 +72,6 @@ def backfill(identifier):
         finally:
             conn.close()
 
-    log.info("Backfill complete for %s: %d records", identifier, count)
-    return {"did": did, "records": count}
+    log.info("Backfill complete for %s: %d records synced, %d orphaned deleted",
+             identifier, count, len(orphaned))
+    return {"did": did, "records": count, "deleted": len(orphaned)}

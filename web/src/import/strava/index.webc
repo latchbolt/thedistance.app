@@ -46,13 +46,11 @@ title: Import from Strava - The Distance
               Choose “Settings,” then find the “My Account” tab from the menu
               listed on the Left
             </li>
-            <li>
-              Select “Get Started” under “Download or Delete Your Account”
-            </li>
+            <li>Under “Download your Account” tap “Get Started”</li>
             <li>Select “Request your archive” on the next page</li>
             <li>
               You will receive an email with a link to download your data (this
-              may take a few hours)
+              might take a few hours)
             </li>
             <li>Once you have the zip file, upload it here</li>
           </ol>
